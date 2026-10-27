@@ -1,3 +1,4 @@
+local Glow = require(game:GetService("ServerScriptService"):WaitForChild("SpiritRadianceGlow"))
 -- Script: ServerScriptService.WeaponSkills
 -- Skill Z/X dan ultimate G milik tiap pedang yang dibeli, plus pasif tebasan biasa.
 -- Pedang dikenali dari attribute "Element" di Tool: Thunder (Spirit Sword), Ice (Sky Sword),
@@ -333,6 +334,7 @@ SkillRemote.OnServerEvent:Connect(function(plr, key, aim)
 	local tool, el = weaponOf(char)
 	if not tool then return end
 	if not ready(plr, el .. key, CD[key] - 0.2) then return end
+	if el == "Thunder" then Glow.pulse(tool, key == "G" and 3 or 2, key == "G" and 4.5 or 1.5) end
 	if key == "G" then fx("UltStart", plr, el) end
 	task.spawn(function()
 		if DELAY[key] > 0 then task.wait(DELAY[key]) end

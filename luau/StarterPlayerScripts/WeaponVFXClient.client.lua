@@ -1,7 +1,4 @@
--- LocalScript: StarterPlayer.StarterPlayerScripts.WeaponVFXClient
--- Efek elemen senjata yang digambar di layar tiap pemain (petir acak, kilatan pas dicabut).
--- Emitter dan cahaya dasar ada di dalam Tool (kelihatan semua orang). Script ini cuma nambah yang perlu gerak acak.
--- Elemen dibaca dari attribute "Element" di Tool. Sekarang baru "Thunder" (Spirit Sword).
+-- Efek elemen senjata di layar tiap pemain (petir acak, kilatan pas dicabut). Elemen dari attribute "Element" di Tool.
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
@@ -24,7 +21,6 @@ local function boltSegment(a, b, width, color, life)
 	return p
 end
 
--- Petir zig-zag dari a ke b, lapisan inti putih + lapisan biru lebih tebal
 local function bolt(a, b, jag, width, life)
 	local n = math.max(3, math.floor((b - a).Magnitude / 0.5))
 	local dir = (b - a).Unit
@@ -63,7 +59,6 @@ local function flashLight(sword, brightness, dur)
 	Debris:AddItem(l, dur)
 end
 
--- Kilatan pas pedang dicabut: petir dari atas ke ujung bilah + ledakan percikan
 local function onEquip(tool)
 	local sword, base, tip = bladePoints(tool)
 	if not sword then return end
@@ -75,7 +70,6 @@ local function onEquip(tool)
 	if burst then burst:Emit(30) end
 end
 
--- Tiap pedang yang lagi dipegang dapet petir kecil yang merambat di bilah
 local active = {}
 local function track(tool)
 	if active[tool] or tool:GetAttribute("Element") ~= "Thunder" then return end

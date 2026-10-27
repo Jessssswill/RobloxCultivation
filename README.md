@@ -9,30 +9,21 @@ Project script game Qi Cultivation. Kode baru ditulis pakai TypeScript (roblox-t
 | `src/shared` | Modul TypeScript yang dipakai server dan client | `ReplicatedStorage.TS` |
 | `src/server` | Script server TypeScript (`*.server.ts`) | `ServerScriptService.TS` |
 | `src/client` | Script client TypeScript (`*.client.ts`) | `StarterPlayer.StarterPlayerScripts.TS` |
-| `luau/shared` | Modul Luau lama | `ReplicatedStorage.Luau` |
-| `luau/server` | Script server Luau lama | `ServerScriptService.Luau` |
-| `luau/client` | LocalScript Luau lama | `StarterPlayerScripts.Luau` |
+| `luau/ServerScriptService` | Semua script Luau di ServerScriptService (17) | lokasi aslinya, nama sama |
+| `luau/StarterPlayerScripts` | Semua LocalScript di StarterPlayerScripts (19) | lokasi aslinya, nama sama |
+| `luau/ReplicatedStorage` | `WeaponScale` dan folder `Skill` (3 modul) | lokasi aslinya, nama sama |
+| `luau/dalam_model` | Script yang nempel di dalam Tool/model (senjata, monster, NPC, backup) | belum disambung |
+| `luau/shared` | Rencana modul `WeaponCombo` gabungan | `ReplicatedStorage.Luau` |
 
-Rojo cuma ngatur folder `TS` dan `Luau` di atas. Isi lain di Studio (map, CombatCore, QiClient, dan lainnya) nggak disentuh.
+Daftar lengkap 81 script, lokasi Studio, dan filenya ada di `luau/DAFTAR SCRIPT.md`.
 
-## Yang udah masuk
+Tiap script Luau dipetakan satu per satu di `default.project.json` ke path aslinya, jadi `require` dan `WaitForChild` yang udah ada tetap jalan. Semua node pakai `$ignoreUnknownInstances`, jadi anak di dalam script (misalnya bola di `Skill.Disintegration`) dan semua isi place lain (map, model, UI) nggak disentuh Rojo. `MonsterSpawner` tetap mati (`Disabled`) lewat `MonsterSpawner.meta.json`.
 
-- `src/shared/weaponScale.ts` dan `src/server/weaponScale.server.ts`: skala senjata ngikutin tinggi avatar. Ini script pertama yang udah ditulis ulang ke TypeScript.
-- `luau/server/WeaponSkills.server.lua`: skill Z/X/G dan pasif 4 pedang.
-- `luau/client/WeaponSkillClient.client.lua`: input, cut-in, dan efek skill pedang.
-- `luau/client/SkillScrollHUD.client.lua`: gulungan skill di pojok kanan bawah (PC).
-- `luau/client/WeaponVFXClient.client.lua`: petir di Spirit Sword.
-- `luau/shared/WeaponCombo.lua`: combo 4 hit jadi satu modul. Sekarang tiap pedang punya salinan LocalScript sendiri (5 salinan). Nanti diganti LocalScript kecil di tiap Tool:
-  ```lua
-  require(game.ReplicatedStorage:WaitForChild("Luau"):WaitForChild("WeaponCombo"))(script.Parent)
-  ```
-  Satu baris di modul ini masih sementara (cek "lagi meditasi atau nggak"). Baris aslinya ada di `StarterPack.QiSword.ComboClient` dan baru bisa disalin dari Studio.
+## Status (27 Okt 2026)
 
-## Yang belum masuk
-
-Script ini cuma ada di Studio, jadi harus ditarik dulu: QiClient, CombatCore, ComboClient dan HitServer (QiSword), SprintServer dan SprintClient, ZoneLighting, SerpentAnimator, AttachScabbard, WeaponRackGive, ComboServer di tiap pedang, dan script lain yang ada di place.
-
-Caranya: simpan place ke file lokal di laptop (File > Save to File As, bukan publish), terus jalanin `rojo syncback` biar semua script keluar jadi file. Habis itu tiap script dicocokin dan dipindah ke folder di atas.
+- Semua 81 script udah ditarik dari place (Download a Copy, 27 Okt). 39 script yang langsung ada di service udah disambung Rojo, isinya dicek sama persis dengan di Studio.
+- 42 script di dalam Tool/model isinya cuma 12 versi beda (contoh: `WeaponCombo` disalin 12x, `ComboServer` 12x dalam 2 versi, `MonsterAI` 6 monster pakai yang sama). Disimpan sekali per versi di `luau/dalam_model/`. Belum disambung karena Tool/model-nya sendiri diurus di Studio. Langkah berikutnya: ganti salinan itu jadi script kecil yang `require` satu modul.
+- `src/server/weaponScale.server.ts` itu versi TS dari `WeaponScaleServer`. Kalau dua-duanya jalan, skala dipasang dua kali. Pilih salah satu sebelum `npm run watch`.
 
 ## Cara nyambungin ke Studio (di laptop)
 
@@ -43,7 +34,7 @@ Butuh Node.js (LTS) dan Rojo 7.7.1 (udah ada di `C:\Users\Shen\Project\ROBLOX\Ro
 3. Di terminal lain jalanin `rojo serve`.
 4. Di Studio buka plugin Rojo, klik Connect.
 
-**Penting sebelum Connect pertama kali:** script yang sekarang ada di Studio dengan nama yang sama (misalnya `ServerScriptService.WeaponSkills`, `StarterPlayerScripts.WeaponSkillClient`, `SkillScrollHUD`, `WeaponVFXClient`) harus dihapus dulu. Kalau nggak, script-nya jalan dua kali. Ini nunggu oke Will karena berarti hapus script di place.
+**Penting soal Connect:** Rojo bakal nimpa 39 script di Studio yang namanya sama dengan isi dari folder `luau/`. Nggak ada yang jalan dua kali, jadi nggak perlu hapus apa-apa dulu. Tapi habis Connect, script itu diedit di file (VS Code), bukan di Studio, karena editan di Studio bakal ketimpa.
 
 ## Perintah
 

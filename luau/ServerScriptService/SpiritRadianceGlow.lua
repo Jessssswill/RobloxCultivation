@@ -3,24 +3,7 @@
 -- Glow.pulse(tool, level, duration): level 1 = basic attack, 2 = skill Z/X, 3 = ultimate G.
 -- Sets Tool attributes GlowLevel and GlowUntil (workspace:GetServerTimeNow() time). Never lowers a higher active level;
 -- a lower pulse that outlasts it takes over when the higher one ends.
---
--- Where to call it (these files are not edited here, check the lines before pasting):
---   local Glow = require(game:GetService("ServerScriptService"):WaitForChild("SpiritRadianceGlow"))
---
---   1) Basic attack: the ComboServer Script inside each Tool, in tool.Hit.OnServerEvent (the "Hit" remote that
---      shared/WeaponCombo.lua fires with remote:FireServer(i) at each swing's Hit marker), after its own checks:
---          if tool:GetAttribute("Element") == "Thunder" then Glow.pulse(tool, 1, 0.6) end
---      The swinging client already lights its own sword at once (SpiritRadianceVFX predicts on tool.Activated),
---      so this call is what other players see.
---      No-edit fallback: in WeaponSkills.server.lua the Core.dealDamage wrapper (src == "combo") also knows the
---      tool, but it only runs when a swing hits something.
---
---   2) Skills: server/WeaponSkills.server.lua, SkillRemote.OnServerEvent, right after
---          if not ready(plr, el .. key, CD[key] - 0.2) then return end
---      add
---          if el == "Thunder" then Glow.pulse(tool, key == "G" and 3 or 2, key == "G" and 4.5 or 1.5) end
---      Z/X: 1.5 s. G (SK.Thunder.G, Nine Clouds Thunder): 1.25 s wind-up + 0.7 s + 9 strikes x 0.14 s + 0.25 s
---      before the pillar, about 3.5 s, so 4.5 keeps the sword lit through the pillar. Use 3 for a shorter flare.
+-- Called from the Spirit Sword ComboServer (level 1) and ServerScriptService.WeaponSkills (Z/X level 2, G level 3).
 local Glow = {}
 
 local follow = setmetatable({}, { __mode = "k" }) -- tool -> token of a pending lower-level continuation
