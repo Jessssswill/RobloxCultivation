@@ -1,0 +1,185 @@
+{
+	"name": "qi-cultivation-luau",
+	"globIgnorePaths": [
+		"**/package.json",
+		"**/tsconfig.json"
+	],
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"$className": "ReplicatedStorage",
+			"Luau": {
+				"$path": "luau/shared"
+			},
+			"Skill": {
+				"Disintegration": {
+					"$path": "luau/ReplicatedStorage/Skill/Disintegration.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"GiantSwing": {
+					"$path": "luau/ReplicatedStorage/Skill/GiantSwing.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"$className": "Folder",
+				"$ignoreUnknownInstances": true
+			},
+			"WeaponScale": {
+				"$path": "luau/ReplicatedStorage/WeaponScale.lua",
+				"$ignoreUnknownInstances": true
+			}
+		},
+		"ServerScriptService": {
+			"$className": "ServerScriptService",
+			"ArenaPortals": {
+				"$path": "luau/ServerScriptService/ArenaPortals.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"AttachScabbard": {
+				"$path": "luau/ServerScriptService/AttachScabbard.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"CombatCore": {
+				"$path": "luau/ServerScriptService/CombatCore.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"CombatServer": {
+				"$path": "luau/ServerScriptService/CombatServer.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"DemonFormServer": {
+				"$path": "luau/ServerScriptService/DemonFormServer.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"HeavenPortals": {
+				"$path": "luau/ServerScriptService/HeavenPortals.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"MonsterSpawner": {
+				"$path": "luau/ServerScriptService/MonsterSpawner.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"MountFX": {
+				"$path": "luau/ServerScriptService/MountFX.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"NetherPortals": {
+				"$path": "luau/ServerScriptService/NetherPortals.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SpiritRadianceGlow": {
+				"$path": "luau/ServerScriptService/SpiritRadianceGlow.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SprintServer": {
+				"$path": "luau/ServerScriptService/SprintServer.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SteedServer": {
+				"$path": "luau/ServerScriptService/SteedServer.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SwordServer": {
+				"$path": "luau/ServerScriptService/SwordServer.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"WeaponRackGive": {
+				"$path": "luau/ServerScriptService/WeaponRackGive.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"WeaponScaleServer": {
+				"$path": "luau/ServerScriptService/WeaponScaleServer.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"WeaponSkills": {
+				"$path": "luau/ServerScriptService/WeaponSkills.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"ZoneSpawner": {
+				"$path": "luau/ServerScriptService/ZoneSpawner.server.lua",
+				"$ignoreUnknownInstances": true
+			}
+		},
+		"StarterPlayer": {
+			"$className": "StarterPlayer",
+			"StarterPlayerScripts": {
+				"$className": "StarterPlayerScripts",
+				"QiClient": {
+					"$path": "luau/StarterPlayerScripts/QiClient.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"LocalScript": {
+					"$path": "luau/StarterPlayerScripts/LocalScript.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"ZoneLighting": {
+					"$path": "luau/StarterPlayerScripts/ZoneLighting.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"SprintClient": {
+					"$path": "luau/StarterPlayerScripts/SprintClient.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"SerpentAnimator": {
+					"$path": "luau/StarterPlayerScripts/SerpentAnimator.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"WeaponVFXClient": {
+					"$path": "luau/StarterPlayerScripts/WeaponVFXClient.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"WeaponSkillClient": {
+					"$path": "luau/StarterPlayerScripts/WeaponSkillClient.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"SkillScrollHUD": {
+					"$path": "luau/StarterPlayerScripts/SkillScrollHUD.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"HeavenCloudsPrime": {
+					"$path": "luau/StarterPlayerScripts/HeavenCloudsPrime.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"SpiritRadianceVFX": {
+					"$path": "luau/StarterPlayerScripts/SpiritRadianceVFX.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"ArenaSealFX": {
+					"$path": "luau/StarterPlayerScripts/ArenaSealFX.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"ArenaSealCinematic": {
+					"$path": "luau/StarterPlayerScripts/ArenaSealCinematic.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"SteedClient": {
+					"$path": "luau/StarterPlayerScripts/SteedClient.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"LavaFX": {
+					"$path": "luau/StarterPlayerScripts/LavaFX.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"WeaponLife": {
+					"$path": "luau/StarterPlayerScripts/WeaponLife.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"BeastHairPhysics": {
+					"$path": "luau/StarterPlayerScripts/BeastHairPhysics.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"DemonFormClient": {
+					"$path": "luau/StarterPlayerScripts/DemonFormClient.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"SwordClient": {
+					"$path": "luau/StarterPlayerScripts/SwordClient.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"MountCamFX": {
+					"$path": "luau/StarterPlayerScripts/MountCamFX.client.lua",
+					"$ignoreUnknownInstances": true
+				}
+			}
+		}
+	}
+}

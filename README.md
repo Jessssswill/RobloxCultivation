@@ -27,6 +27,10 @@ Tiap script Luau dipetakan satu per satu di `default.project.json` ke path aslin
 
 ## Cara nyambungin ke Studio (di laptop)
 
+**Versi cepat, cuma script Luau (nggak butuh Node.js):** jalanin `rojo serve luau.project.json`, terus Connect dari plugin Rojo di Studio. File `luau.project.json` sama dengan `default.project.json` tapi tanpa bagian TypeScript.
+
+**Versi lengkap (Luau + TypeScript):**
+
 Butuh Node.js (LTS) dan Rojo 7.7.1 (udah ada di `C:\Users\Shen\Project\ROBLOX\Rojo`).
 
 1. Buka terminal di folder project ini, jalanin `npm install` sekali.
