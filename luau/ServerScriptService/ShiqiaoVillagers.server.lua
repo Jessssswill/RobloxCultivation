@@ -1,26 +1,36 @@
--- Warga Desa Shiqiao: orang jalan-jalan di jalur desa, pedagang di depan toko, warga duduk di bangku,
--- dan yang ngobrol berdua. Semua bisa diajak bicara (pakai QiRemotes.Dialog yang sudah ada).
--- Titik diletakkan di workspace.DesaShiqiao.TitikWarga (Part tak terlihat, atribut "Peran"):
---   Jalan    = titik tujuan jalan-jalan
---   Pedagang = pedagang berdiri menghadap LookVector titik (atribut "Toko" = jenis toko)
---   Duduk    = Seat di bangku
---   Ngobrol  = dua warga berdiri berhadapan di sekitar titik
+-- Warga Desa Shiqiao. Titik-titiknya di workspace.DesaShiqiao.TitikWarga (Part tak terlihat, atribut "Peran"),
+-- dibuat oleh map/shiqiao/warga/buat_titik_warga.lua:
+--   Jalan    = titik jalur desa; warga jalan-jalan di sekitar "rumah"-nya sendiri biar tersebar rata
+--   Pedagang = pedagang di depan toko, menghadap LookVector titik (atribut "Toko" = jenis toko)
+--   Duduk    = duduk di bangku (bukan Seat, biar pemain/warga lain tidak ikut kedudukan)
+--   Ngobrol  = dua warga ngobrol berhadapan
+--   Diam     = warga berdiri di satu tempat; atribut "Gaya" = Rumah (depan rumah) / Mancing (tepi sungai)
+-- Semua bisa diajak bicara (QiRemotes.Dialog). Warga yang diam di-anchor, yang jalan punya anti-nyangkut.
 local Players = game:GetService("Players")
 local PFS = game:GetService("PathfindingService")
+local PhysicsService = game:GetService("PhysicsService")
 local RS = game:GetService("ReplicatedStorage")
 
 local desa = workspace:WaitForChild("DesaShiqiao")
 local titik = desa:WaitForChild("TitikWarga")
 local Dialog = RS:WaitForChild("QiRemotes"):WaitForChild("Dialog")
 
-local JUMLAH_JALAN = 12
+local JUMLAH_JALAN = 14
+local JUMLAH_ANAK = 4
+local RADIUS_JALAN = 90 -- warga jalan-jalan paling jauh segini dari titik rumahnya
 local folderWarga = Instance.new("Folder")
 folderWarga.Name = "Warga"
 local ANIM = {
 	idle = "rbxassetid://507766388",
 	walk = "rbxassetid://507777826",
+	run = "rbxassetid://507767714",
 	sit = "rbxassetid://2506281703",
 }
+
+-- warga tidak saling tabrak (dulu sering nyangkut karena dua warga saling dorong di jalan sempit)
+local GRUP = "Warga"
+pcall(function() PhysicsService:RegisterCollisionGroup(GRUP) end)
+PhysicsService:CollisionGroupSetCollidable(GRUP, GRUP, false)
 
 -- Penampilan warga = layered clothing katalog (NPC tidak perlu beli). Dipilih dari uji lineup 2026-10-29:
 -- baju rakyat biasa warna kusam, bukan jubah naga/dewa yang cocoknya buat kultivator.
@@ -53,9 +63,13 @@ local LOOKS = {
 
 local NAMA = {
 	pria = {"Uncle Wang", "Old Zhou", "Brother Liu", "Farmer Sun", "Grandpa Ma", "Woodcutter He", "Fisher Gao", "Brother Tang",
-		"Old Feng", "Ferryman Luo", "Carpenter Deng", "Young Pan", "Uncle Xu", "Herder Kong", "Potter Yuan", "Brother Shen"},
+		"Old Feng", "Ferryman Luo", "Carpenter Deng", "Young Pan", "Uncle Xu", "Herder Kong", "Potter Yuan", "Brother Shen",
+		"Old Han", "Uncle Bai", "Butcher Niu", "Brother Qin", "Grandpa Tao", "Farmer Yang", "Mason Fu", "Young Jin",
+		"Uncle Hou", "Old Shi", "Brother Ren", "Weaver Lu", "Hunter Mo", "Uncle Peng"},
 	wanita = {"Auntie Li", "Sister Fang", "Granny Qian", "Little Mei", "Widow Zhao", "Sister Ning", "Auntie Hu",
-		"Weaver Lan", "Auntie Song", "Little Yu", "Granny Lin", "Sister Cui", "Auntie Jiang", "Washer Wu"},
+		"Weaver Lan", "Auntie Song", "Little Yu", "Granny Lin", "Sister Cui", "Auntie Jiang", "Washer Wu",
+		"Auntie Guo", "Sister Rong", "Granny Ye", "Auntie Xie", "Sister Hua", "Widow Tian", "Auntie Ma",
+		"Sister Jing", "Granny Pei", "Auntie Lou", "Sister Ying", "Auntie Ding", "Granny Shao", "Sister Qiu"},
 }
 
 local OBROLAN = {
@@ -79,6 +93,27 @@ local PEDAGANG = {
 	Toko = {"Rope, lamps, sandals, a bit of everything.", "Honest goods, honest price."},
 }
 local SAPA = {"Good day.", "Safe travels.", "Fine weather today.", "Hm? Oh, hello."}
+
+local RUMAH = {
+	"Mind your step, the stones are slick after rain.",
+	"My husband is out in the paddies until dusk.",
+	"Come back at supper, there'll be congee.",
+	"This house has stood since my grandfather's day.",
+	"The roof leaks every spring. Every spring!",
+}
+local MANCING = {
+	"Shh. You'll scare the carp.",
+	"The river gives, if you're patient.",
+	"Caught a fish with golden scales once. Nobody believes me.",
+	"Best spot in Shiqiao, right here.",
+}
+local NAMA_ANAK = {"Little Bao", "Little Hu", "Little Lan", "Little Shun"}
+local ANAK = {
+	"Catch me if you can!",
+	"Are you a real cultivator? Can you fly?",
+	"Mother says I can't go past the bridge.",
+	"I'm going to join the Lanyun Sect one day!",
+}
 
 -- ===== pembuatan model =====
 local function buatDesc(look)
@@ -123,13 +158,19 @@ local function buatWarga(look, nama)
 	hum.WalkSpeed = 6 + math.random() * 2
 	hum.BreakJointsOnDeath = false
 	hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+	hum:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+	hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+	hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
 	local animate = m:FindFirstChild("Animate")
 	if animate then animate:Destroy() end
+	for _, p in m:GetDescendants() do
+		if p:IsA("BasePart") then p.CollisionGroup = GRUP end
+	end
 	m:SetAttribute("Warga", true)
 	return m
 end
 
-local function animasi(m)
+local function animasi(m, jalanPakaiLari)
 	local hum = m:FindFirstChildOfClass("Humanoid")
 	local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
 	local t = {}
@@ -140,15 +181,17 @@ local function animasi(m)
 	end
 	t.idle.Looped = true
 	t.walk.Looped = true
+	t.run.Looped = true
 	t.sit.Looped = true
 	t.sit.Priority = Enum.AnimationPriority.Action
 	t.idle:Play()
+	local gerak = jalanPakaiLari and t.run or t.walk
 	hum.Running:Connect(function(speed)
 		if speed > 0.5 then
-			if not t.walk.IsPlaying then t.walk:Play(0.2) end
-			t.walk:AdjustSpeed(speed / 8)
-		elseif t.walk.IsPlaying then
-			t.walk:Stop(0.25)
+			if not gerak.IsPlaying then gerak:Play(0.2) end
+			gerak:AdjustSpeed(jalanPakaiLari and speed / 16 or speed / 8)
+		elseif gerak.IsPlaying then
+			gerak:Stop(0.25)
 		end
 	end)
 	return t
@@ -196,6 +239,14 @@ local function hadap(m, pos)
 	if (tgt - p).Magnitude > 0.1 then root.CFrame = CFrame.lookAt(p, tgt) end
 end
 
+local function pemainDekat(pos, jarak)
+	for _, plr in Players:GetPlayers() do
+		local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+		if hrp and (hrp.Position - pos).Magnitude < jarak then return hrp end
+	end
+	return nil
+end
+
 local function pasangObrolan(m, lines, sibuk)
 	local root = m:FindFirstChild("HumanoidRootPart")
 	local pp = Instance.new("ProximityPrompt")
@@ -210,8 +261,9 @@ local function pasangObrolan(m, lines, sibuk)
 		local hrp = char and char:FindFirstChild("HumanoidRootPart")
 		if sibuk then sibuk.sampai = os.clock() + 5 end
 		local hum = m:FindFirstChildOfClass("Humanoid")
-		if hrp and hum and not hum.Sit then
-			hum:MoveTo(root.Position)
+		-- yang di-anchor (duduk / diam) cukup noleh kalau tidak sedang duduk
+		if hrp and hum and not m:GetAttribute("Duduk") then
+			if not root.Anchored then hum:MoveTo(root.Position) end
 			hadap(m, hrp.Position)
 		end
 		Dialog:FireClient(plr, m.Name, lines[math.random(#lines)])
@@ -221,28 +273,24 @@ local function pasangObrolan(m, lines, sibuk)
 		local terakhir = 0
 		while m.Parent do
 			task.wait(2 + math.random() * 2)
-			if os.clock() - terakhir > 25 then
-				for _, plr in Players:GetPlayers() do
-					local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-					if hrp and root.Parent and (hrp.Position - root.Position).Magnitude < 16 then
-						bilang(m, math.random() < 0.5 and SAPA[math.random(#SAPA)] or lines[math.random(#lines)], 4)
-						terakhir = os.clock()
-						break
-					end
-				end
+			if os.clock() - terakhir > 25 and root.Parent and pemainDekat(root.Position, 16) then
+				bilang(m, math.random() < 0.5 and SAPA[math.random(#SAPA)] or lines[math.random(#lines)], 4)
+				terakhir = os.clock()
 			end
 		end
 	end)
 end
 
-local function letakkan(m, cf)
+-- cf = titik di tanah (kaki), menghadap arah LookVector-nya
+local function letakkan(m, cf, anchor)
 	local hum = m:FindFirstChildOfClass("Humanoid")
 	local root = m:FindFirstChild("HumanoidRootPart")
-	m:PivotTo(cf + Vector3.new(0, hum.HipHeight + root.Size.Y / 2 + 0.1, 0))
+	m:PivotTo(cf + Vector3.new(0, hum.HipHeight + root.Size.Y / 2 + 0.05, 0))
 	-- Atomic: model dikirim utuh ke client (kalau tidak, badannya bisa belum ke-stream)
 	m.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+	root.Anchored = anchor == true
 	m.Parent = folderWarga
-	root:SetNetworkOwner(nil)
+	if not root.Anchored then root:SetNetworkOwner(nil) end
 end
 
 -- ===== peran =====
@@ -251,48 +299,114 @@ for _, p in titik:GetChildren() do
 	if p:GetAttribute("Peran") == "Jalan" then table.insert(semuaJalan, p) end
 end
 
-local function tujuanAcak(dari)
+local function tanah(p)
+	return p.CFrame - Vector3.new(0, p.Size.Y / 2, 0)
+end
+
+-- titik rumah tersebar rata: pilih titik yang paling jauh dari yang sudah dipilih
+local function sebarRata(jumlah)
+	local hasil = {}
+	if #semuaJalan == 0 then return hasil end
+	table.insert(hasil, semuaJalan[math.random(#semuaJalan)])
+	while #hasil < jumlah do
+		local terbaik, jarakTerbaik = nil, -1
+		for _, p in semuaJalan do
+			local dMin = math.huge
+			for _, q in hasil do dMin = math.min(dMin, (p.Position - q.Position).Magnitude) end
+			if dMin > jarakTerbaik then terbaik, jarakTerbaik = p, dMin end
+		end
+		if jarakTerbaik <= 0 then
+			table.insert(hasil, semuaJalan[math.random(#semuaJalan)])
+		else
+			table.insert(hasil, terbaik)
+		end
+	end
+	return hasil
+end
+
+local function tujuanAcak(dari, rumah, radius)
 	local cocok = {}
 	for _, p in semuaJalan do
 		local d = (p.Position - dari).Magnitude
-		if d > 25 and d < 160 then table.insert(cocok, p) end
+		if d > 20 and (p.Position - rumah.Position).Magnitude < radius then table.insert(cocok, p) end
 	end
-	if #cocok == 0 then return semuaJalan[math.random(#semuaJalan)] end
-	return cocok[math.random(#cocok)]
+	if #cocok >= 2 then return cocok[math.random(#cocok)] end
+	-- rumahnya di pinggir desa dan sepi titik: pakai beberapa titik terdekat dari rumah
+	-- (dulu balik ke titik rumah sendiri, jadi warganya diam di tempat terus)
+	local urut = table.clone(semuaJalan)
+	table.sort(urut, function(a, b)
+		return (a.Position - rumah.Position).Magnitude < (b.Position - rumah.Position).Magnitude
+	end)
+	local pilih = {}
+	for _, p in urut do
+		if (p.Position - dari).Magnitude > 10 then table.insert(pilih, p) end
+		if #pilih >= 4 then break end
+	end
+	return pilih[math.random(#pilih)] or rumah
 end
 
-local function jalanJalan(m)
+-- jalan ke satu waypoint; false kalau tidak maju-maju (nyangkut)
+local function jalanKe(hum, root, pos)
+	hum:MoveTo(pos)
+	local mulai = os.clock()
+	local cek, posCek = os.clock(), root.Position
+	while true do
+		task.wait(0.25)
+		if not root.Parent then return false end
+		local flat = (root.Position - pos) * Vector3.new(1, 0, 1)
+		if flat.Magnitude < 2.5 then return true end
+		if os.clock() - cek > 1.5 then
+			if (root.Position - posCek).Magnitude < 0.8 then return false end
+			cek, posCek = os.clock(), root.Position
+			hum:MoveTo(pos) -- MoveTo habis setelah 8 detik, diulang biar tidak berhenti di tengah jalan
+		end
+		if os.clock() - mulai > 20 then return false end
+	end
+end
+
+local function jalanJalan(m, rumah, radius, lines)
 	local hum = m:FindFirstChildOfClass("Humanoid")
 	local root = m:FindFirstChild("HumanoidRootPart")
 	local sibuk = {sampai = 0}
-	pasangObrolan(m, OBROLAN, sibuk)
-	local path = PFS:CreatePath({AgentRadius = 2, AgentHeight = 5.5, AgentCanJump = false, WaypointSpacing = 6,
+	pasangObrolan(m, lines, sibuk)
+	local path = PFS:CreatePath({AgentRadius = 1.5, AgentHeight = 5.5, AgentCanJump = false, WaypointSpacing = 5,
 		Costs = {Water = math.huge}})
+	local gagal = 0
 	while m.Parent do
-		local tujuan = tujuanAcak(root.Position)
+		local tujuan = tujuanAcak(root.Position, rumah, radius)
 		-- titik awal harus dekat tanah, kalau dari tinggi pinggang jalurnya sering gagal
 		local kaki = root.Position - Vector3.new(0, hum.HipHeight + root.Size.Y / 2 - 1, 0)
 		local ok = pcall(function() path:ComputeAsync(kaki, tujuan.Position + Vector3.new(0, 0.5, 0)) end)
+		local sampai = false
 		if ok and path.Status == Enum.PathStatus.Success then
+			sampai = true
 			for _, wp in path:GetWaypoints() do
 				while os.clock() < sibuk.sampai do task.wait(0.5) end
 				if not m.Parent then return end
-				hum:MoveTo(wp.Position)
-				local selesai = hum.MoveToFinished:Wait()
-				if not selesai then break end
+				if not jalanKe(hum, root, wp.Position) then
+					sampai = false
+					break
+				end
 			end
 		end
-		task.wait(3 + math.random() * 7)
+		if sampai then
+			gagal = 0
+			task.wait(3 + math.random() * 7)
+		else
+			gagal += 1
+			hum:MoveTo(root.Position)
+			-- nyangkut terus: pindah diam-diam ke titik jalan dekat rumah (kalau tidak ada pemain yang lihat)
+			if gagal >= 3 and not pemainDekat(root.Position, 70) then
+				local ke = tujuanAcak(rumah.Position, rumah, radius)
+				if not pemainDekat(ke.Position, 70) then
+					root.CFrame = CFrame.new(tanah(ke).Position + Vector3.new(0, hum.HipHeight + root.Size.Y / 2 + 0.05, 0))
+					gagal = 0
+				end
+			end
+			task.wait(1 + math.random())
+		end
 	end
 end
-
-local function berdiamDiri(m, cf, lines)
-	letakkan(m, cf)
-	pasangObrolan(m, lines)
-end
-
--- ===== mulai =====
-folderWarga.Parent = desa
 
 local function lookAcak(tipe)
 	local pilih = {}
@@ -302,55 +416,88 @@ local function lookAcak(tipe)
 	return pilih[math.random(#pilih)]
 end
 
+local function diam(p, lines, look)
+	local m = buatWarga(look or lookAcak())
+	if not m then return end
+	letakkan(m, tanah(p), true)
+	-- animasi dimuat setelah model masuk workspace; kalau sebelumnya, ada yang ke-replikasi T-pose
+	animasi(m)
+	pasangObrolan(m, lines)
+end
+
+local function duduk(p)
+	local m = buatWarga(lookAcak())
+	if not m then return end
+	-- pinggul di permukaan bangku: root turun dari posisi berdiri
+	local root = m.HumanoidRootPart
+	m:PivotTo(p.CFrame + Vector3.new(0, p.Size.Y / 2 + root.Size.Y / 2 + 0.35, 0))
+	m.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
+	root.Anchored = true
+	m:SetAttribute("Duduk", true)
+	m.Parent = folderWarga
+	local t = animasi(m)
+	t.idle:Stop()
+	t.sit:Play()
+	pasangObrolan(m, OBROLAN)
+end
+
+local function ngobrol(p)
+	local a, b = buatWarga(lookAcak("pria")), buatWarga(lookAcak("wanita"))
+	if not (a and b) then return end
+	local c = tanah(p)
+	local kanan = c.RightVector * 1.9
+	letakkan(a, CFrame.lookAt(c.Position - kanan, c.Position + kanan), true)
+	letakkan(b, CFrame.lookAt(c.Position + kanan, c.Position - kanan), true)
+	animasi(a)
+	animasi(b)
+	pasangObrolan(a, OBROLAN)
+	pasangObrolan(b, OBROLAN)
+	while a.Parent and b.Parent do
+		task.wait(6 + math.random() * 6)
+		local w = math.random() < 0.5 and a or b
+		bilang(w, OBROLAN[math.random(#OBROLAN)], 5)
+	end
+end
+
+-- ===== mulai =====
+folderWarga.Parent = desa
+
 for _, p in titik:GetChildren() do
 	local peran = p:GetAttribute("Peran")
 	if peran == "Pedagang" then
-		task.spawn(function()
-			local m = buatWarga(lookAcak())
-			if not m then return end
-			animasi(m)
-			berdiamDiri(m, p.CFrame - Vector3.new(0, p.Size.Y / 2, 0), PEDAGANG[p:GetAttribute("Toko")] or PEDAGANG.Toko)
-		end)
-	elseif peran == "Duduk" and p:IsA("Seat") then
-		task.spawn(function()
-			local m = buatWarga(lookAcak())
-			if not m then return end
-			local t = animasi(m)
-			letakkan(m, p.CFrame)
-			p:Sit(m:FindFirstChildOfClass("Humanoid"))
-			t.sit:Play()
-			pasangObrolan(m, OBROLAN)
-		end)
+		task.spawn(diam, p, PEDAGANG[p:GetAttribute("Toko")] or PEDAGANG.Toko)
+	elseif peran == "Duduk" then
+		task.spawn(duduk, p)
 	elseif peran == "Ngobrol" then
-		task.spawn(function()
-			local a, b = buatWarga(lookAcak("pria")), buatWarga(lookAcak("wanita"))
-			if not (a and b) then return end
-			animasi(a)
-			animasi(b)
-			local c = p.Position - Vector3.new(0, p.Size.Y / 2, 0)
-			letakkan(a, CFrame.lookAt(c + Vector3.new(-1.8, 0, 0), c + Vector3.new(1.8, 0, 0)))
-			letakkan(b, CFrame.lookAt(c + Vector3.new(1.8, 0, 0), c + Vector3.new(-1.8, 0, 0)))
-			pasangObrolan(a, OBROLAN)
-			pasangObrolan(b, OBROLAN)
-			while a.Parent and b.Parent do
-				task.wait(6 + math.random() * 6)
-				local w = math.random() < 0.5 and a or b
-				bilang(w, OBROLAN[math.random(#OBROLAN)], 5)
-			end
-		end)
+		task.spawn(ngobrol, p)
+	elseif peran == "Diam" then
+		local gaya = p:GetAttribute("Gaya")
+		if gaya == "Mancing" then
+			task.spawn(diam, p, MANCING, lookAcak("pria"))
+		else
+			task.spawn(diam, p, RUMAH)
+		end
 	end
 end
 
 if #semuaJalan >= 2 then
-	for i = 1, JUMLAH_JALAN do
+	local rumah = sebarRata(JUMLAH_JALAN + JUMLAH_ANAK)
+	-- diacak biar anak-anak tidak selalu dapat titik paling pinggir
+	for i = #rumah, 2, -1 do local j = math.random(i) rumah[i], rumah[j] = rumah[j], rumah[i] end
+	for i = 1, JUMLAH_JALAN + JUMLAH_ANAK do
 		task.spawn(function()
 			task.wait(i * 0.3)
-			local m = buatWarga(lookAcak())
+			local anak = i > JUMLAH_JALAN
+			local namaAnak = anak and (NAMA_ANAK[i - JUMLAH_JALAN] or "Little Tao") or nil
+			local m = buatWarga(lookAcak(), namaAnak)
 			if not m then return end
-			animasi(m)
-			local mulai = semuaJalan[math.random(#semuaJalan)]
-			letakkan(m, CFrame.new(mulai.Position - Vector3.new(0, mulai.Size.Y / 2, 0)) * CFrame.Angles(0, math.random() * 6.28, 0))
-			jalanJalan(m)
+			if anak then
+				m:ScaleTo(0.72)
+				m.Humanoid.WalkSpeed = 11 + math.random() * 3
+			end
+			letakkan(m, CFrame.new(tanah(rumah[i]).Position) * CFrame.Angles(0, math.random() * 6.28, 0))
+			animasi(m, anak)
+			jalanJalan(m, rumah[i], anak and 60 or RADIUS_JALAN, anak and ANAK or OBROLAN)
 		end)
 	end
 end
