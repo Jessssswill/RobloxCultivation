@@ -24,6 +24,7 @@
 | `ServerScriptService.WeaponRackGive` | `luau/ServerScriptService/WeaponRackGive.server.lua` | ya |
 | `ServerScriptService.WeaponScaleServer` | `luau/ServerScriptService/WeaponScaleServer.server.lua` | ya |
 | `ServerScriptService.WeaponSkills` | `luau/ServerScriptService/WeaponSkills.server.lua` | ya |
+| `ServerScriptService.ShiqiaoVillagers` | `luau/ServerScriptService/ShiqiaoVillagers.server.lua` | ya |
 | `ServerScriptService.ZoneSpawner` | `luau/ServerScriptService/ZoneSpawner.server.lua` | ya |
 | `ServerStorage.MonsterTemplate.Animate` | `luau/dalam_model/Animate.client.lua` | belum |
 | `ServerStorage.MonsterTemplate.MonsterAI` | `luau/dalam_model/MonsterAI.server.lua` | belum |

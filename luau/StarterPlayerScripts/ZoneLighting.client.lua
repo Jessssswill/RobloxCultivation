@@ -68,6 +68,16 @@ local ZONES = {
 		Bloom = {Intensity = 0.3, Threshold = 1.8, Size = 24},
 		Rays = {Intensity = 0},
 	}),
+	-- Desa Shiqiao: pagi berkabut di lembah (referensi #7)
+	Shiqiao = preset({
+		Lighting = {ClockTime = 9, Brightness = 1.8, Ambient = Color3.fromRGB(84, 88, 92),
+			OutdoorAmbient = Color3.fromRGB(132, 138, 142), ExposureCompensation = 0.15},
+		Atmosphere = {Density = 0.4, Offset = 0.22, Haze = 2.4, Glare = 0.1,
+			Color = Color3.fromRGB(200, 208, 212), Decay = Color3.fromRGB(128, 138, 146)},
+		Color = {TintColor = Color3.fromRGB(240, 243, 245), Saturation = -0.12, Contrast = 0.1},
+		Bloom = {Intensity = 0.3},
+		Rays = {Intensity = 0.04},
+	}),
 }
 
 -- nilai bawaan dari semua properti yang dipakai zona mana pun

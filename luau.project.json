@@ -97,6 +97,10 @@
 			"ZoneSpawner": {
 				"$path": "luau/ServerScriptService/ZoneSpawner.server.lua",
 				"$ignoreUnknownInstances": true
+			},
+			"ShiqiaoVillagers": {
+				"$path": "luau/ServerScriptService/ShiqiaoVillagers.server.lua",
+				"$ignoreUnknownInstances": true
 			}
 		},
 		"StarterPlayer": {
