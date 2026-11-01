@@ -23,6 +23,15 @@ local KC = Enum.KeyCode
 local TEX_SPARK = "rbxasset://textures/particles/sparkles_main.dds"
 local TEX_SMOKE = "rbxasset://textures/particles/smoke_main.dds"
 local MAX_DIST = 320
+-- self-made VFX textures (assets/VFX/textures_v1). nil = fall back to the old part-based look
+local VTX = { -- uploaded 2026-11-01 (will OK'd)
+	lightningFlip = "rbxassetid://85766794891773", lightningBeam = "rbxassetid://123916754948707", glow = "rbxassetid://86794260657796",
+	flare = "rbxassetid://74917717176224", spark = nil, shock = "rbxassetid://120638941464407", smokeFlip = "rbxassetid://128189018436398",
+	frost = "rbxassetid://106494765248742", snow = "rbxassetid://132476517971091", petal = "rbxassetid://115963999420447",
+	lotus = "rbxassetid://125562162597738", aura = "rbxassetid://103751465846390", crescent = "rbxassetid://116325702137675",
+	swirl = "rbxassetid://74831198929905",
+	formation = {Thunder = "rbxassetid://100516579563166", Ice = "rbxassetid://135665340346401", Lotus = "rbxassetid://70633139336376", Jade = "rbxassetid://91197797275866"},
+}
 
 local THEME = {
 	Thunder = {a = Color3.fromRGB(235, 245, 255), b = Color3.fromRGB(90, 170, 255), c = Color3.fromRGB(45, 50, 80)},
@@ -180,6 +189,46 @@ local function segment(a, b, width, color, life, transp)
 end
 
 local function bolt(a, b, jag, width, life, th, branches)
+	if VTX.lightningBeam then -- hand-drawn bolt texture on two camera-facing beams, flickering
+		local holder = part(Vector3.one * 0.2, CFrame.new(a), th.a, {Transparency = 1})
+		local a0 = Instance.new("Attachment") a0.Parent = holder a0.WorldPosition = a
+		local a1 = Instance.new("Attachment") a1.Parent = holder a1.WorldPosition = b
+		local flip = math.random() < 0.5
+		for k = 1, 2 do
+			local bm = Instance.new("Beam")
+			bm.Attachment0, bm.Attachment1 = flip and a1 or a0, flip and a0 or a1
+			bm.Texture = VTX.lightningBeam
+			bm.TextureMode = Enum.TextureMode.Stretch
+			bm.LightEmission, bm.LightInfluence = 1, 0
+			bm.FaceCamera = true
+			bm.Segments = 12
+			bm.Color = ColorSequence.new(k == 1 and th.a or th.b)
+			local w = (k == 1 and 5 or 12) * width + jag * (k == 1 and 1.4 or 3)
+			bm.Width0, bm.Width1 = w, w * 0.85
+			bm.CurveSize0, bm.CurveSize1 = (math.random() - 0.5) * jag * 2, (math.random() - 0.5) * jag * 2
+			bm.Parent = holder
+			local base = k == 1 and 0 or 0.35
+			local t0 = os.clock()
+			task.spawn(function()
+				while bm.Parent and os.clock() - t0 < life do
+					local u = (os.clock() - t0) / life
+					bm.Transparency = NumberSequence.new(math.clamp(base + u * u * 0.9 + math.random() * 0.25, 0, 1))
+					task.wait(0.03)
+				end
+				bm.Transparency = NumberSequence.new(1)
+			end)
+		end
+		if VTX.glow then burst(b, th.b, 1, 0, width * 14 + jag, VTX.glow, life) end
+		if branches then
+			for _ = 1, 2 do
+				local mid = a:Lerp(b, 0.3 + math.random() * 0.4)
+				local off = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5).Unit * (b - a).Magnitude * 0.25
+				bolt(mid, mid + off, jag * 0.5, width * 0.5, life * 0.8, th, false)
+			end
+		end
+		Debris:AddItem(holder, life + 0.1)
+		return
+	end
 	local n = math.clamp(math.floor((b - a).Magnitude / 2.2), 3, 18)
 	local dir = (b - a).Unit
 	local side = dir:Cross(Vector3.yAxis)
@@ -536,7 +585,9 @@ end
 -- 0-1.3 close-up on the face and the sword-finger seal -> 1.3-2.6 wide orbit while the set piece grows (avatar, dragon, throne...)
 -- -> 2.6-3.55 low hero shot as the blade rises, calligraphy name -> 3.55 whip -> 3.7 impact frame on the cleave -> wide shot of the payoff
 -- Player attribute UltCutscene = false (settings menu, later) skips all camera work.
-local ORBIT = {Thunder = {26, 14}, Jade = {24, 12}, Lotus = {15, 5}, Ice = {13, 3}}
+local camRay = RaycastParams.new()
+camRay.FilterType = Enum.RaycastFilterType.Exclude
+local ORBIT = {Thunder = {26, 14}, Jade = {24, 12}, Lotus = {21, 7}, Ice = {13, 3}}
 local function cutIn(text, th, el, aim)
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -588,9 +639,9 @@ local function cutIn(text, th, el, aim)
 		elseif t < 3.55 then -- 3. low hero shot looking up as the blade goes to the sky
 			local u = (t - 2.6) / 0.95
 			local tip = bladeTip(char)
-			local d = big and 17 or 7.5
+			local d = big and 17 or (el == "Jade" and 10 or 8)
 			local look = big and hp + Vector3.new(0, 13, 0) or hp:Lerp(tip, 0.55)
-			cf = CFrame.lookAt((base * CFrame.Angles(0, math.rad(25 - 15 * u), 0) * CFrame.new(0, -1.9, -d + 1.2 * u)).Position, look)
+			cf = CFrame.lookAt((base * CFrame.Angles(0, math.rad(25 - 15 * u), 0) * CFrame.new(0, 0.6, -d + 1.2 * u)).Position, look)
 			fov = 64
 		elseif t < 3.7 then -- 4. whip in from the side
 			local u = (t - 3.55) / 0.15
@@ -604,8 +655,8 @@ local function cutIn(text, th, el, aim)
 			local side = back:Cross(Vector3.yAxis)
 			local pos, look
 			if big then -- side-on so the avatar and the target are both in frame
-				pos = root.Position + side * (26 + 4 * u) + back * 4 + Vector3.new(0, 8 + 3 * u, 0)
-				look = root.Position:Lerp(target, 0.45) + Vector3.new(0, 7, 0)
+				pos = root.Position + side * (40 + 6 * u) + back * 12 + Vector3.new(0, 14 + 3 * u, 0)
+				look = root.Position:Lerp(target, 0.4) + Vector3.new(0, 10, 0)
 			elseif el == "Jade" then
 				pos = root.Position + back * (18 + 6 * u) + side * 10 + Vector3.new(0, 14 + 4 * u, 0)
 				look = root.Position:Lerp(target, 0.65) + Vector3.new(0, 4 * (1 - u), 0)
@@ -615,6 +666,21 @@ local function cutIn(text, th, el, aim)
 			end
 			cf = CFrame.lookAt(pos, look)
 			fov = 72
+		end
+		if t >= 1.3 then -- keep the camera out of trees, roofs and the ground
+			local to = cf.Position
+			local ex = {char, folder}
+			for _ = 1, 4 do
+				camRay.FilterDescendantsInstances = ex
+				local r = workspace:Raycast(hp, to - hp, camRay)
+				if not r then break end
+				if r.Instance ~= workspace.Terrain and r.Instance.Transparency > 0.6 then
+					table.insert(ex, r.Instance)
+				else
+					cf = cf + (r.Position - (to - hp).Unit * 1.2 - to)
+					break
+				end
+			end
 		end
 		if shake > 0 then
 			shake = math.max(0, shake - 1 / 60)
@@ -638,7 +704,7 @@ local function cutIn(text, th, el, aim)
 	task.wait(1.1)
 	-- impact frame: two frames of inverted black/white, then the colour comes back hot
 	flashF.BackgroundColor3 = Color3.new(0, 0, 0)
-	flashF.BackgroundTransparency = 0.05
+	flashF.BackgroundTransparency = 0.45
 	cc.Saturation, cc.Contrast, cc.Brightness = -1, 1, 0.15
 	han.TextTransparency, title.TextTransparency = 1, 1
 	han.TextStrokeTransparency, title.TextStrokeTransparency = 1, 1
@@ -663,7 +729,7 @@ local function darkSky(color, dur)
 	local cc = Instance.new("ColorCorrectionEffect")
 	cc.Name = "WeaponUltSky"
 	cc.Parent = Lighting
-	tween(cc, 0.4, {Brightness = -0.12, Contrast = 0.15, Saturation = -0.25, TintColor = color})
+	tween(cc, 0.4, {Brightness = -0.04, Contrast = 0.15, Saturation = -0.2, TintColor = color})
 	task.delay(dur, function()
 		tween(cc, 0.8, {Brightness = 0, Contrast = 0, Saturation = 0, TintColor = Color3.new(1, 1, 1)})
 		Debris:AddItem(cc, 0.9)
@@ -896,6 +962,101 @@ end
 -- Thunder = 法相 giant lightning avatar of the caster, Ice = 领域 frozen domain + sky-splitting cut, Lotus = 莲台 throne + 万剑 petal swords,
 -- Jade = 龙魂 jade dragon coiling up the caster then spiralling down on the target.
 local ULT = {LEAD = 3.7, recent = {}}
+
+-- flat textured disc (formation, lotus, frost, swirl...): glowing SurfaceGui image on an invisible plate
+function ULT.disc(pos, size, tex, color, life, o)
+	o = o or {}
+	if not o.down then pos += Vector3.new(0, o.lift or 0.8, 0) end -- sit above terrain grass
+	local p = part(Vector3.new(size, 0.05, size), CFrame.new(pos), color, {Transparency = 1})
+	local im
+	for _, face in (o.both and {Enum.NormalId.Top, Enum.NormalId.Bottom} or {o.down and Enum.NormalId.Bottom or Enum.NormalId.Top}) do
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = face
+		sg.LightInfluence = 0
+		sg.Brightness = o.bright or 2.5
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+		sg.CanvasSize = Vector2.new(1024, 1024)
+		sg.Parent = p
+		local l = Instance.new("ImageLabel")
+		l.Size = UDim2.fromScale(1, 1)
+		l.BackgroundTransparency = 1
+		l.Image = tex
+		l.ImageColor3 = color
+		l.ImageTransparency = 1
+		l.Parent = sg
+		tween(l, o.fadeIn or 0.4, {ImageTransparency = o.transp or 0})
+		task.delay(life, function()
+			if l.Parent then tween(l, o.fadeOut or 0.5, {ImageTransparency = 1}) end
+		end)
+		im = im or l
+	end
+	if o.grow then
+		p.Size = Vector3.new(o.grow[1], 0.05, o.grow[1])
+		tween(p, o.grow[2], {Size = Vector3.new(size, 0.05, size)}, Enum.EasingStyle.Quint)
+	end
+	local spin = math.rad(o.spin or 0)
+	if spin ~= 0 then
+		local base, t0 = CFrame.new(pos), os.clock()
+		local con
+		con = RunS.RenderStepped:Connect(function()
+			if not p.Parent then con:Disconnect() return end
+			p.CFrame = base * CFrame.Angles(0, spin * (os.clock() - t0), 0)
+		end)
+	end
+	Debris:AddItem(p, life + (o.fadeOut or 0.5) + 0.1)
+	return p, im
+end
+
+-- upright textured card visible from both sides (crescent waves)
+function ULT.card(cf, w, h, tex, color, life, bright)
+	local p = part(Vector3.new(w, h, 0.05), cf, color, {Transparency = 1})
+	local ims = {}
+	for _, face in {Enum.NormalId.Front, Enum.NormalId.Back} do
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = face
+		sg.LightInfluence = 0
+		sg.Brightness = bright or 3
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+		sg.CanvasSize = Vector2.new(1024, 512)
+		sg.Parent = p
+		local l = Instance.new("ImageLabel")
+		l.Size = UDim2.fromScale(1, 1)
+		l.BackgroundTransparency = 1
+		l.Image = tex
+		l.ImageColor3 = color
+		l.Parent = sg
+		task.delay(life * 0.5, function() if l.Parent then tween(l, life * 0.5, {ImageTransparency = 1}) end end)
+		table.insert(ims, l)
+	end
+	Debris:AddItem(p, life + 0.1)
+	return p, ims
+end
+
+function ULT.emit(parent, cfg)
+	local e = Instance.new("ParticleEmitter")
+	e.LightEmission, e.LightInfluence = 1, 0
+	e.Rate = 0
+	for k, v in cfg do e[k] = v end
+	e.Parent = parent
+	return e
+end
+
+-- star flare + soft glow at a point
+function ULT.flash(pos, color, size, life)
+	if not VTX.flare then return end
+	local p = part(Vector3.one * 0.2, CFrame.new(pos), color, {Transparency = 1})
+	ULT.emit(p, {Texture = VTX.flare, Color = ColorSequence.new(color), ZOffset = 2, Lifetime = NumberRange.new(life), Speed = NumberRange.new(0), Rotation = NumberRange.new(0, 45),
+		Size = NumberSequence.new({NumberSequenceKeypoint.new(0, size * 0.3), NumberSequenceKeypoint.new(0.15, size), NumberSequenceKeypoint.new(1, size * 0.5)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.6, 0.25), NumberSequenceKeypoint.new(1, 1)})}):Emit(1)
+	if VTX.glow then
+		ULT.emit(p, {Texture = VTX.glow, Color = ColorSequence.new(color), Lifetime = NumberRange.new(life * 1.3), Speed = NumberRange.new(0),
+			Size = NumberSequence.new(size * 0.6, size * 1.1), Transparency = NumberSequence.new(0.2, 1)}):Emit(1)
+	end
+	Debris:AddItem(p, life * 1.3 + 0.1)
+end
+
+function ULT.shock(pos, size, color, t, down)
+	if VTX.shock then ULT.disc(pos, size, VTX.shock, color, t * 0.35, {grow = {size * 0.1, t}, fadeOut = t * 0.65, bright = 3, fadeIn = 0.05, down = down}) end
+end
 ULT.GLYPHS = {
 	Thunder = {"雷", "霆", "震", "霄", "电", "鸣", "天", "罚"},
 	Ice = {"冰", "霜", "寒", "封", "雪", "凝", "天", "斩"},
@@ -905,6 +1066,15 @@ ULT.GLYPHS = {
 
 -- formation array (阵法): counter-rotating rings, an eight-point star and glowing glyphs; y > 5 = hangs in the sky
 function ULT.array(center, radius, th, el, life, y)
+	local tex = VTX.formation[el]
+	if tex then
+		local down = (y or 0) > 5
+		local pos = center + Vector3.new(0, y or 0.2, 0)
+		ULT.disc(pos, radius * 2.3, tex, th.b, life, {spin = 22, down = down, bright = 3, grow = {radius * 0.4, 0.7}, fadeIn = 0.5})
+		ULT.disc(pos + Vector3.new(0, down and -0.1 or 0.1, 0), radius * 1.15, tex, th.a, life, {spin = -45, down = down, bright = 2, grow = {radius * 0.2, 0.9}, fadeIn = 0.6, transp = 0.25})
+		ULT.shock(pos, radius * 3.2, th.a, 0.7, down)
+		return
+	end
 	local items = {}
 	local sky = (y or 0) > 5
 	local function add(p, rel, dir) table.insert(items, {p, rel, dir}) end
@@ -995,7 +1165,7 @@ function ULT.Thunder(plr, th, center)
 		if d:IsA("BasePart") then
 			d.CanCollide, d.CanQuery, d.CanTouch, d.CastShadow, d.Massless, d.Anchored = false, false, false, false, true, false
 			d.Material = Enum.Material.Neon
-			d.Color = th.b:Lerp(th.a, 0.25)
+			d.Color = th.b
 			d.Transparency = 1
 			if d:IsA("MeshPart") then pcall(function() d.TextureID = "" end) end
 			table.insert(parts, d)
@@ -1007,14 +1177,48 @@ function ULT.Thunder(plr, th, center)
 	av.Parent = folder
 	local S = 5
 	pcall(function() av:ScaleTo(S) end)
+	local emitters = {}
+	if VTX.aura then
+		for _, nm in {"UpperTorso", "LowerTorso", "RightUpperArm", "LeftUpperArm", "Head", "Torso"} do
+			local bp = av:FindFirstChild(nm)
+			if bp then
+				table.insert(emitters, ULT.emit(bp, {Texture = VTX.aura, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+					LightEmission = 0.7, Color = ColorSequence.new(th.b, th.c), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 3), NumberSequenceKeypoint.new(1, 6)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.5), NumberSequenceKeypoint.new(1, 1)}),
+					Lifetime = NumberRange.new(0.6, 0.9), Rate = 8, Speed = NumberRange.new(4, 8), EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(15, 15)}))
+			end
+		end
+	end
+	if VTX.lightningFlip then
+		local bp = av:FindFirstChild("UpperTorso") or av:FindFirstChild("Torso") or avRoot
+		table.insert(emitters, ULT.emit(bp, {Texture = VTX.lightningFlip, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.Random,
+			Color = ColorSequence.new(th.a), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 9, 3), NumberSequenceKeypoint.new(1, 11, 3)}), Transparency = NumberSequence.new(0, 0.5),
+			Lifetime = NumberRange.new(0.1, 0.18), Rate = 14, Speed = NumberRange.new(0), Rotation = NumberRange.new(-180, 180)}))
+	end
+	task.delay(5.2, function() for _, e in emitters do e.Enabled = false end end)
+	if VTX.smokeFlip then
+		local cl = part(Vector3.new(40, 6, 40), CFrame.new(center + Vector3.new(0, 42, 0)), th.c, {Transparency = 1})
+		local sm = ULT.emit(cl, {Texture = VTX.smokeFlip, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+			LightEmission = 0, LightInfluence = 0.3, Color = ColorSequence.new(Color3.fromRGB(35, 38, 62), Color3.fromRGB(80, 95, 140)),
+			Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 14, 4), NumberSequenceKeypoint.new(1, 22, 4)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.15), NumberSequenceKeypoint.new(0.8, 0.3), NumberSequenceKeypoint.new(1, 1)}),
+			Lifetime = NumberRange.new(1.8, 2.6), Rate = 26, Speed = NumberRange.new(1, 3), Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-20, 20)})
+		sm:Emit(20)
+		local lf
+		if VTX.lightningFlip then
+			lf = ULT.emit(cl, {Texture = VTX.lightningFlip, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.Random,
+				Color = ColorSequence.new(th.a), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 12, 4), NumberSequenceKeypoint.new(1, 12, 4)}), Transparency = NumberSequence.new(0, 0.6),
+				Lifetime = NumberRange.new(0.1, 0.16), Rate = 7, Speed = NumberRange.new(0), Rotation = NumberRange.new(-180, 180), ZOffset = 1})
+		end
+		task.delay(5.4, function() sm.Enabled = false if lf then lf.Enabled = false end end)
+		Debris:AddItem(cl, 8.5)
+	end
 	local hl = Instance.new("Highlight")
 	hl.FillColor, hl.OutlineColor = th.b, th.a
 	hl.FillTransparency, hl.OutlineTransparency = 1, 1
 	hl.DepthMode = Enum.HighlightDepthMode.Occluded
 	hl.Parent = av
-	tween(hl, 0.9, {FillTransparency = 0.7, OutlineTransparency = 0})
+	tween(hl, 0.9, {FillTransparency = 1, OutlineTransparency = 0.15})
 	for _, p in parts do
-		if p ~= avRoot then tween(p, 0.9, {Transparency = 0.5}) end
+		if p ~= avRoot then tween(p, 0.9, {Transparency = 0.6}) end
 	end
 	-- joints to mirror (player's Transform -> avatar, translations scaled up)
 	local pairs_ = {}
@@ -1059,9 +1263,12 @@ function ULT.Thunder(plr, th, center)
 		local tip = bladeTip(av)
 		bolt(tip, center, 7, 1.4, 0.7, th, true)
 		task.delay(0.08, function() bolt(tip + Vector3.new(3, 0, 0), center, 9, 0.8, 0.6, th, true) end)
-		burst(center + Vector3.new(0, 2, 0), th.a, 60, 55, 1.4, nil, 0.8)
+		burst(center + Vector3.new(0, 2, 0), th.a, 60, 55, 1.4, VTX.spark, 0.8)
 		ring(center + Vector3.new(0, 0.4, 0), 16, th.b, 0.6, 0.6, 0.1)
 		light(center + Vector3.new(0, 8, 0), th.b, 18, 80, 0.7)
+		if VTX.frost then ULT.disc(ground(center) + Vector3.new(0, 0.15, 0), 32, VTX.frost, th.b, 1.2, {bright = 4, grow = {6, 0.25}, fadeIn = 0.05, fadeOut = 1}) end
+		ULT.flash(center + Vector3.new(0, 3, 0), th.a, 34, 0.6)
+		ULT.shock(center + Vector3.new(0, 0.3, 0), 40, th.b, 0.7)
 	end)
 	task.delay(5.5, function()
 		if not av.Parent then return end
@@ -1080,13 +1287,26 @@ function ULT.Ice(plr, th, center)
 	local cc = Instance.new("ColorCorrectionEffect")
 	cc.Name = "UltDomain"
 	cc.Parent = Lighting
-	tween(cc, 0.8, {Saturation = -0.85, Contrast = 0.15, TintColor = Color3.fromRGB(205, 228, 255)})
+	tween(cc, 0.8, {Saturation = -0.6, Contrast = 0.1, Brightness = 0.06, TintColor = Color3.fromRGB(215, 232, 255)})
 	task.delay(5.6, function()
-		tween(cc, 0.8, {Saturation = 0, Contrast = 0, TintColor = Color3.new(1, 1, 1)})
+		tween(cc, 0.8, {Saturation = 0, Contrast = 0, Brightness = 0, TintColor = Color3.new(1, 1, 1)})
 		Debris:AddItem(cc, 0.9)
 	end)
 	ULT.array(g, 16, th, "Ice", 5.5)
-	for _ = 1, 80 do
+	if VTX.frost then ULT.disc(g + Vector3.new(0, 0.12, 0), 44, VTX.frost, th.a, 5.2, {bright = 2.5, grow = {4, 1.4}, fadeOut = 0.8}) end
+	if VTX.snow then -- snow frozen mid-air all around
+		local box = part(Vector3.new(56, 24, 56), CFrame.new(root.Position + Vector3.new(0, 9, 0)), th.a, {Transparency = 1})
+		ULT.emit(box, {Texture = VTX.snow, LightEmission = 0.6, Color = ColorSequence.new(th.a), Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.9, 0.4), NumberSequenceKeypoint.new(1, 0.9, 0.4)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.08, 0.05), NumberSequenceKeypoint.new(0.9, 0.1), NumberSequenceKeypoint.new(1, 1)}),
+			Lifetime = NumberRange.new(5, 5.4), Speed = NumberRange.new(0), Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-15, 15)}):Emit(140)
+		if VTX.glow then
+			ULT.emit(box, {Texture = VTX.glow, Color = ColorSequence.new(th.b), Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+				Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.4, 0.6), NumberSequenceKeypoint.new(1, 1.4, 0.6)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.1, 0.3), NumberSequenceKeypoint.new(0.9, 0.4), NumberSequenceKeypoint.new(1, 1)}),
+				Lifetime = NumberRange.new(5, 5.4), Speed = NumberRange.new(0)}):Emit(60)
+		end
+		Debris:AddItem(box, 6)
+	end
+	for _ = 1, VTX.snow and 0 or 80 do
 		local p0 = root.Position + Vector3.new((math.random() - 0.5) * 56, math.random() * 24 - 2, (math.random() - 0.5) * 56)
 		local s = 0.15 + math.random() * 0.3
 		local p = part(Vector3.one * s, CFrame.new(p0 + Vector3.new(0, 4, 0)), th.a, {Shape = Enum.PartType.Ball, Transparency = 1})
@@ -1127,6 +1347,16 @@ function ULT.Ice(plr, th, center)
 		tween(waveGlow, 0.3, {CFrame = cf * CFrame.new(0, 9, -dist), Size = Vector3.new(50, 4, 0.1)})
 		fade(wave, 0.2, 0.3)
 		fade(waveGlow, 0.2, 0.3)
+		if VTX.crescent then
+			wave.Transparency, waveGlow.Transparency = 1, 1
+			for k = 0, 1 do
+				local c0 = cf * CFrame.new(0, 9, -2) * CFrame.Angles(0, k * math.pi / 2, k == 0 and 0 or math.pi / 2)
+				local c, ims = ULT.card(c0, 30, 15, VTX.crescent, k == 0 and th.a or th.b, 0.5, 4)
+				tween(c, 0.32, {CFrame = cf * CFrame.new(0, 9, -dist) * CFrame.Angles(0, k * math.pi / 2, k == 0 and 0 or math.pi / 2), Size = Vector3.new(52, 26, 0.05)}, Enum.EasingStyle.Quart)
+			end
+		end
+		ULT.flash(center + Vector3.new(0, 2, 0), th.a, 40, 0.7)
+		ULT.shock(center + Vector3.new(0, 0.3, 0), 46, th.b, 0.8)
 		screenFlash(th.a, 0.35)
 	end)
 end
@@ -1139,9 +1369,26 @@ function ULT.Lotus(plr, th, center)
 	local h = tool and tool:FindFirstChild("Handle")
 	if not (root and h) then return end
 	local g = ground(root.Position)
-	lotus(g + Vector3.new(0, 0.4, 0), 9, th, 5.6, 0.9)
+	if VTX.lotus then -- giant lotus throne opening under the caster
+		ULT.disc(g + Vector3.new(0, 0.35, 0), 22, VTX.lotus, Color3.new(1, 1, 1), 5.4, {spin = 8, bright = 1.1, grow = {1, 1.2}})
+		ULT.disc(g + Vector3.new(0, 0.55, 0), 11, VTX.lotus, Color3.new(1, 0.96, 0.98), 5.4, {spin = -14, bright = 1.4, grow = {0.5, 1.5}, transp = 0.1})
+	else
+		lotus(g + Vector3.new(0, 0.4, 0), 9, th, 5.6, 0.9)
+	end
 	ULT.array(g, 14, th, "Lotus", 5.6)
-	petalStorm(g, 8, 30, 5, th, 9)
+	if VTX.petal then
+		local plate = part(Vector3.new(34, 1, 34), CFrame.new(g + Vector3.new(0, 1, 0)), th.b, {Transparency = 1})
+		local pe = ULT.emit(plate, {Texture = VTX.petal, LightEmission = 0, LightInfluence = 0.4, Color = ColorSequence.new(Color3.new(1, 1, 1)),
+			Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.1, 0.3), NumberSequenceKeypoint.new(1, 0.9, 0.3)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.1, 0), NumberSequenceKeypoint.new(0.85, 0.1), NumberSequenceKeypoint.new(1, 1)}),
+			Lifetime = NumberRange.new(3, 4), Rate = 15, Speed = NumberRange.new(5, 9), EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(35, 35),
+			Acceleration = Vector3.new(0, 0.6, 0), Drag = 0.4, Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-120, 120)})
+		pe.Enabled = false
+		task.delay(1.3, function() pe.Enabled = true end) -- after the close-up so petals never fill the lens
+		task.delay(5, function() pe.Enabled = false end)
+		Debris:AddItem(plate, 9)
+	else
+		petalStorm(g, 8, 30, 5, th, 9)
+	end
 	-- the blade piece of the caster's sword is the template for every flying sword
 	local best, bm
 	for _, d in tool:GetDescendants() do
@@ -1153,7 +1400,7 @@ function ULT.Lotus(plr, th, center)
 	local align = CFrame.fromRotationBetweenVectors(tipAxis, -Vector3.zAxis)
 	local swords = {}
 	for ringI = 1, 3 do
-		local n = 6 + ringI * 3
+		local n = 4 + ringI * 3
 		for i = 1, n do
 			local s = best:Clone()
 			for _, ch in s:GetChildren() do ch:Destroy() end
@@ -1168,12 +1415,12 @@ function ULT.Lotus(plr, th, center)
 			local tr = Instance.new("Trail")
 			tr.Attachment0, tr.Attachment1 = at, a2
 			tr.Color = ColorSequence.new(th.a, th.b)
-			tr.LightEmission = 1
+			tr.LightEmission = 0.5
 			tr.Lifetime = 0.25
 			tr.Transparency = NumberSequence.new(0.3, 1)
 			tr.WidthScale = NumberSequence.new(1, 0)
 			tr.Parent = s
-			tween(s, 0.4, {Transparency = 0.1})
+			tween(s, 0.4, {Transparency = 0.3})
 			local ra, rr = math.random() * math.pi * 2, 4 + math.random() * 15
 			local hit = ground(center + Vector3.new(math.cos(ra) * rr, 0, math.sin(ra) * rr))
 			table.insert(swords, {s = s, ring = ringI, a = (i / n) * math.pi * 2, delay = math.random() * 0.25, hit = hit})
@@ -1209,10 +1456,15 @@ function ULT.Lotus(plr, th, center)
 				local look = (hit - from).Unit
 				tween(w.s, 0.22, {CFrame = CFrame.lookAt(hit - look * 1.5, hit) * align}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 				task.delay(0.22, function()
-					burst(hit + Vector3.new(0, 0.5, 0), th.a, 8, 18, 0.5, nil, 0.4)
-					local p = petal(CFrame.new(hit + Vector3.new(0, 0.3, 0)) * CFrame.Angles(0, math.random() * 6.28, 0), 2.4, th.b, 0.1)
-					p.Material = Enum.Material.Neon
-					fade(p, 0.5, 0.3)
+					burst(hit + Vector3.new(0, 0.5, 0), th.a, 8, 18, 0.5, VTX.spark, 0.4)
+					if VTX.petal then
+						burst(hit + Vector3.new(0, 0.5, 0), Color3.new(1, 1, 1), 6, 14, 1.2, VTX.petal, 0.7)
+						if i % 6 == 0 then ULT.flash(hit + Vector3.new(0, 1, 0), th.b, 7, 0.3) end
+					else
+						local p = petal(CFrame.new(hit + Vector3.new(0, 0.3, 0)) * CFrame.Angles(0, math.random() * 6.28, 0), 2.4, th.b, 0.1)
+						p.Material = Enum.Material.Neon
+						fade(p, 0.5, 0.3)
+					end
 					fade(w.s, 0.4, 0.5)
 				end)
 			end)
@@ -1271,7 +1523,7 @@ function ULT.dragon(scale, th)
 		tr.Transparency = NumberSequence.new(0.5, 1)
 		tr.Parent = segs[i].body
 	end
-	local d = {all = all, open = 0}
+	local d = {all = all, open = 0, segs = segs, head = head}
 	function d.place(path, t, spacing)
 		local hp = path(t)
 		local look = hp - path(t - spacing * 0.5)
@@ -1316,6 +1568,19 @@ function ULT.Jade(plr, th, center)
 	ULT.recent.Jade = os.clock()
 	ULT.array(g, 15, th, "Jade", 5.6)
 	local d = ULT.dragon(3.2, th)
+	if VTX.swirl then ULT.disc(g + Vector3.new(0, 0.2, 0), 26, VTX.swirl, th.b, 3.6, {spin = 140, bright = 3, grow = {4, 1}}) end
+	local dEm = {}
+	if VTX.aura then
+		for i = 1, #d.segs, 4 do
+			table.insert(dEm, ULT.emit(d.segs[i].body, {Texture = VTX.aura, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+				Color = ColorSequence.new(th.a, th.b), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 2), NumberSequenceKeypoint.new(1, 5)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.35), NumberSequenceKeypoint.new(1, 1)}),
+				Lifetime = NumberRange.new(0.4, 0.7), Rate = 14, Speed = NumberRange.new(1, 3), SpreadAngle = Vector2.new(180, 180)}))
+		end
+	end
+	if VTX.glow then
+		table.insert(dEm, ULT.emit(d.head, {Texture = VTX.glow, Color = ColorSequence.new(th.a), Size = NumberSequence.new(9, 4), Transparency = NumberSequence.new(0.3, 1),
+			Lifetime = NumberRange.new(0.25), Rate = 30, Speed = NumberRange.new(0)}))
+	end
 	local top = g + Vector3.new(0, 26, 0)
 	local landing = center + Vector3.new(0, 2, 0)
 	-- one continuous path over time: hidden under the caster -> coils up around them -> rears at the top -> spirals down on the target
@@ -1356,7 +1621,11 @@ function ULT.Jade(plr, th, center)
 		end
 		d.place(path, t, 0.035)
 	end, function()
-		burst(landing, th.a, 70, 60, 1.5, nil, 0.9)
+		burst(landing, th.a, 70, 60, 1.5, VTX.spark, 0.9)
+		for _, e in dEm do e.Enabled = false end
+		ULT.flash(landing, th.a, 40, 0.7)
+		ULT.shock(center + Vector3.new(0, 0.3, 0), 44, th.b, 0.8)
+		if VTX.swirl then ULT.disc(center + Vector3.new(0, 0.25, 0), 36, VTX.swirl, th.a, 1.1, {spin = 220, bright = 3.5, grow = {6, 0.4}, fadeOut = 0.6}) end
 		ring(center + Vector3.new(0, 0.4, 0), 20, th.b, 0.7, 0.6, 0.1)
 		light(center + Vector3.new(0, 6, 0), th.b, 18, 80, 0.7)
 		screenFlash(th.a, 0.3)
