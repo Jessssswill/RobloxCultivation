@@ -72,7 +72,7 @@ local function crescent(f, root, pal, roll, scale, dur)
 end
 
 -- flipbook slash / impact emitters from the pack, recoloured
-local SKIP_WORDS = { "glow", "filler", "fog", "smoke", "ink", "dark", "plume", "billow", "water", "splash" }
+local SKIP_WORDS = { "glow", "filler", "fog", "smoke", "ink", "dark", "plume", "billow", "water", "splash", "shaded" }
 local function SKIP(name)
 	name = string.lower(name)
 	for _, w in ipairs(SKIP_WORDS) do
@@ -94,9 +94,9 @@ local function flipbooks(f, cf, pal, mult, groundToo)
 				local c = e:Clone()
 				c.Enabled = false
 				c.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, pal.core), ColorSequenceKeypoint.new(0.12, pal.main), ColorSequenceKeypoint.new(1, pal.deep) })
-				c.LightEmission = 0.45
+				c.LightEmission = 1 -- additive: the pack's black ink outlines vanish, only the light stays
 				c.LightInfluence = 0
-				c.Brightness = math.min(c.Brightness, 2)
+				c.Brightness = 1.2
 				local ks = {}
 				for _, k in ipairs(c.Size.Keypoints) do table.insert(ks, NumberSequenceKeypoint.new(k.Time, k.Value * sizeK, k.Envelope * sizeK)) end
 				c.Size = NumberSequence.new(ks)
@@ -203,6 +203,146 @@ local function groundRing(f, root, pal, size)
 	end
 end
 
+-- blade sweep: every frame while the sword's trail is on, a glowing sheet is laid between the previous and the current
+-- position of the blade (tip bright, toward the guard faint), so the slash is literally the path the sword cut
+local RunService = game:GetService("RunService")
+local function bladeOf(tool)
+	local handle = tool and tool:FindFirstChild("Handle")
+	if not handle then return end
+	local best, bestMag
+	for _, d in ipairs(tool:GetDescendants()) do
+		if d:IsA("BasePart") and d ~= handle and d.Transparency < 1 then
+			local m = d.Size.Magnitude
+			if not bestMag or m > bestMag then best, bestMag = d, m end
+		end
+	end
+	best = best or handle
+	local sz = best.Size
+	local axis = (sz.X >= sz.Y and sz.X >= sz.Z) and Vector3.xAxis or ((sz.Y >= sz.Z) and Vector3.yAxis or Vector3.zAxis)
+	local half = math.max(sz.X, sz.Y, sz.Z) / 2
+	local a, b = best.CFrame:PointToWorldSpace(axis * half), best.CFrame:PointToWorldSpace(-axis * half)
+	if (a - handle.Position).Magnitude < (b - handle.Position).Magnitude then axis = -axis end
+	return best, axis, half
+end
+
+local function sheet(f, p0, p1, q0, q1, color, transp, life)
+	-- quad p0-p1 (old edge) to q0-q1 (new edge) approximated by one thin plate
+	local mid = (p0 + p1 + q0 + q1) / 4
+	local along = ((p1 - p0) + (q1 - q0)) / 2
+	local across = ((q0 - p0) + (q1 - p1)) / 2
+	if along.Magnitude < 0.05 or across.Magnitude < 0.02 then return end
+	local n = along:Cross(across)
+	if n.Magnitude < 1e-4 then return end
+	local cf = CFrame.fromMatrix(mid, along.Unit, n.Unit)
+	local p = bare(Instance.new("Part"))
+	p.Material = Enum.Material.Neon
+	p.Color = color
+	p.Transparency = transp
+	p.Size = Vector3.new(along.Magnitude, 0.04, across.Magnitude + 0.18)
+	p.CFrame = cf
+	p.Parent = f
+	TweenService:Create(p, TI(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1, Size = Vector3.new(along.Magnitude * 1.02, 0.01, across.Magnitude + 0.18),
+	}):Play()
+end
+
+-- four-point anime glint (luxury sparkle) facing the camera
+local function glint(f, pos, pal, size)
+	local cam = workspace.CurrentCamera
+	local face = CFrame.lookAt(pos, cam.CFrame.Position)
+	for i = 0, 3 do
+		local p = bare(Instance.new("Part"))
+		p.Material = Enum.Material.Neon
+		p.Color = i % 2 == 0 and pal.core or pal.main
+		p.Size = Vector3.new(0.12, 0.1, 0.02)
+		p.CFrame = face * CFrame.Angles(0, 0, math.rad(i * 45))
+		p.Parent = f
+		local len = (i % 2 == 0) and size or size * 0.55
+		TweenService:Create(p, TI(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = Vector3.new(0.1, len, 0.02) }):Play()
+		task.delay(0.09 * slow(), function()
+			if p.Parent then
+				TweenService:Create(p, TI(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = Vector3.new(0.02, len * 1.2, 0.02), Transparency = 1 }):Play()
+			end
+		end)
+	end
+end
+
+local sweeping = {}
+-- blade bands from guard (0) to tip (1): {from, to, colour, transparency, life multiplier}
+local BANDS = {
+	{ 0.0, 0.4, "deep", 0.65, 0.6 },
+	{ 0.4, 0.8, "main", 0.2, 1 },
+	{ 0.8, 1.0, "core", 0.05, 0.85 },
+}
+local function sweep(char, tool, pal, heavy, element)
+	if sweeping[tool] then return end
+	local part, axis, half = bladeOf(tool)
+	if not part then return end
+	local trails = {}
+	for _, d in ipairs(tool:GetDescendants()) do
+		if d:IsA("Trail") then table.insert(trails, d) end
+	end
+	local f = folderFx()
+	local function edge()
+		local tip = part.CFrame:PointToWorldSpace(axis * half * 1.08)
+		local base = part.CFrame:PointToWorldSpace(-axis * half * 0.25)
+		return base, tip
+	end
+	local b0, t0 = edge()
+	local started = os.clock()
+	local frame = 0
+	local ghostParts = {}
+	for _, d in ipairs(tool:GetDescendants()) do
+		if d:IsA("MeshPart") and d.Transparency < 0.5 and d.Size.Magnitude > 1 then table.insert(ghostParts, d) end
+	end
+	local conn
+	sweeping[tool] = true
+	conn = RunService.RenderStepped:Connect(function()
+		local on = false
+		for _, t in ipairs(trails) do if t.Enabled then on = true break end end
+		if not part.Parent or not char.Parent or (os.clock() - started > 0.05 and not on) or os.clock() - started > 1.2 then
+			conn:Disconnect()
+			sweeping[tool] = nil
+			return
+		end
+		local b1, t1 = edge()
+		local life = heavy and 0.3 or 0.22
+		-- fast swings move the tip a long way per frame: cut the gap into thin slices and the blade into bands,
+		-- so the sheet follows the real curved path instead of showing big flat rectangles
+		local steps = math.clamp(math.ceil((t1 - t0).Magnitude / 0.6), 1, 6)
+		for k = 1, steps do
+			local u0, u1 = (k - 1) / steps, k / steps
+			local pb0, pt0 = b0:Lerp(b1, u0), t0:Lerp(t1, u0)
+			local pb1, pt1 = b0:Lerp(b1, u1), t0:Lerp(t1, u1)
+			for _, band in ipairs(BANDS) do
+				sheet(f, pb0:Lerp(pt0, band[1]), pb0:Lerp(pt0, band[2]), pb1:Lerp(pt1, band[1]), pb1:Lerp(pt1, band[2]),
+					pal[band[3]], band[4], life * band[5] * (0.75 + 0.25 * u1))
+			end
+		end
+		if element == "Thunder" and math.random() < 0.35 then bolts(f, t1, pal, 1) end
+		if (element == "Ice" or element == "Jade" or element == "Lotus") and (t1 - t0).Magnitude > 0.01 and math.random() < 0.5 then
+			shards(f, t1, (t1 - t0).Unit, pal, 1, 10)
+		end
+		if element == "Fire" and math.random() < 0.6 then shards(f, t1, Vector3.yAxis, pal, 2, 6) end
+		-- ghost blades: shimmering copies of the sword left along the cut (afterimages)
+		frame += 1
+		if frame % 3 == 1 then
+			for _, src in ipairs(ghostParts) do
+				local g = src:Clone()
+				for _, ch in ipairs(g:GetChildren()) do ch:Destroy() end
+				bare(g)
+				g.Material = Enum.Material.ForceField
+				g.Color = pal.main
+				g.Transparency = 0
+				g.CFrame = src.CFrame
+				g.Parent = f
+				TweenService:Create(g, TI(life * 1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 1 }):Play()
+			end
+		end
+		b0, t0 = b1, t1
+	end)
+end
+
 -- local player only: camera shake, FOV punch, a one-frame colour "impact frame" on the finisher
 local function feel(char, strength, heavy)
 	if Players.LocalPlayer.Character ~= char then return end
@@ -256,18 +396,19 @@ function SwordFX.Spawn(char, tool, clip, phase)
 				}):Play()
 			end
 		else
-			crescent(f, root, pal, fx.roll, 0.42 * fx.reach / 6, 0.3)
+			sweep(char, tool, pal, clip.heavy, el)
 		end
 	elseif phase == "Contact" then
 		local heavy = clip.heavy
 		local pos = cf:PointToWorldSpace(Vector3.new(0, 0.4, -(fx.reach * 0.62)))
 		flash(f, pos, pal, heavy and 8 or 5)
+		local part, axis, half = bladeOf(tool)
+		if part then glint(f, part.CFrame:PointToWorldSpace(axis * half), pal, heavy and 5 or 3.2) end
 		flipbooks(f, CFrame.lookAt(pos, pos + cf.LookVector) * CFrame.Angles(0, 0, math.rad(fx.roll or 0)), pal, heavy and 2 or 1.3, heavy)
 		shards(f, pos, cf.LookVector, pal, heavy and 26 or 14, heavy and 46 or 32)
 		if el == "Thunder" then bolts(f, pos, pal, heavy and 6 or 3) end
 		if heavy then
 			groundRing(f, root, pal, 22)
-			crescent(f, root, pal, 0, 0.7, 0.4)
 		end
 		feel(char, heavy and 1.1 or 0.4, heavy)
 	end
