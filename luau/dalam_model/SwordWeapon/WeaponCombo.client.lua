@@ -63,7 +63,7 @@ attack = function()
 	local clip = SwordCombo.CLIPS[i]
 	relay:FireServer(tool, i)
 	savedSpeed = savedSpeed or hum.WalkSpeed
-	hum.WalkSpeed = savedSpeed * 0.35
+	hum.WalkSpeed = 0 -- stand still while swinging (will 2026-11-01)
 	-- next click is accepted a little after contact so the combo flows without cutting the follow-through short
 	chainAt = os.clock() + clip.contact[#clip.contact] + 0.16
 	local mine
@@ -72,7 +72,7 @@ attack = function()
 			setTrail(on)
 			if on then SwordFX.Spawn(char, tool, clip, "Swing") end
 		end,
-		onLunge = function(speed) lunge(root, speed) end,
+		onLunge = nil, -- no lunge: the attacker stays in place
 		onContact = function()
 			remote:FireServer(i)
 			SwordFX.Spawn(char, tool, clip, "Contact")
