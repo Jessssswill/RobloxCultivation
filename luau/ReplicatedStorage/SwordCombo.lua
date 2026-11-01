@@ -98,12 +98,77 @@ SwordCombo.CLIPS = {
 	},
 }
 
+-- skill clips (not part of the click chain): Z = dash thrust, X = sky raise then cut down, Ult = the G cutscene motion
+-- (charge with the sword-finger seal, raise the blade to the sky, giant cleave at 1.32 s right when the ultimate lands)
+local SEAL = { 80, 0, -45 }
+SwordCombo.SKILLS = {
+	SkillZ = {
+		name = "SkillZ", dur = 0.7, contact = { 0.24 }, trail = { 0.17, 0.34 }, lunge = { 99, 0 },
+		fx = { thrust = true, reach = 9 },
+		keys = {
+			{ 0, READY },
+			{ 0.14, { LT = { 6, 38, 0, 0, -0.36, 0.42 }, UT = { 8, 34, 0 }, RUA = { 8, 0, 32 }, RLA = { 108, 0, 0 }, RH = { -18, 0, 0 },
+				LUA = { 88, 0, -4 }, LLA = { 3, 0, 0 }, RUL = { -12, 0, 0 }, RLL = { -34, 0, 0 }, LUL = { 28, 0, 0 }, LLL = { -40, 0, 0 } } },
+			{ 0.24, { LT = { -8, -18, 0, 0, -0.55, -1.0 }, UT = { -14, -25, 0 }, RUA = { 94, 0, 4 }, RLA = { 0, 0, 0 }, RH = { -4, 0, 0 },
+				LUA = { -35, 0, -60 }, LLA = { 10, 0, 0 }, RUL = { 62, 0, 0 }, RLL = { -50, 0, 0 }, LUL = { -38, 0, 0 }, LLL = { -8, 0, 0 } }, snap = true },
+			{ 0.38, { LT = { -9, -20, 0, 0, -0.6, -1.08 }, UT = { -16, -28, 0 }, RUA = { 96, 0, 2 }, RLA = { 0, 0, 0 }, RH = { -4, 0, 0 },
+				LUA = { -38, 0, -63 }, LLA = { 10, 0, 0 }, RUL = { 64, 0, 0 }, RLL = { -52, 0, 0 }, LUL = { -40, 0, 0 }, LLL = { -8, 0, 0 } } },
+			{ 0.7, READY },
+		},
+	},
+	SkillX = {
+		name = "SkillX", dur = 0.95, contact = { 0.52 }, trail = { 0.43, 0.64 }, lunge = { 99, 0 },
+		fx = { roll = 90, dir = -1, reach = 7.5 },
+		keys = {
+			{ 0, READY },
+			{ 0.22, { LT = { -6, 0, 0, 0, 0.05, 0 }, UT = { -15, 0, 0 }, RUA = { 172, 0, 8 }, RLA = { 6, 0, 0 }, RH = { 30, 0, 0 },
+				LUA = SEAL, LLA = { 100, 0, 0 }, RUL = { 4, 0, 0 }, RLL = { -4, 0, 0 }, LUL = { -4, 0, 0 }, LLL = { -4, 0, 0 } } },
+			{ 0.42, { LT = { -8, 0, 0, 0, 0.12, 0 }, UT = { -18, 0, 0 }, RUA = { 178, 0, 6 }, RLA = { 4, 0, 0 }, RH = { 36, 0, 0 },
+				LUA = SEAL, LLA = { 104, 0, 0 }, RUL = { 4, 0, 0 }, RLL = { -4, 0, 0 }, LUL = { -4, 0, 0 }, LLL = { -4, 0, 0 } } },
+			{ 0.52, { LT = { -10, 0, 0, 0, -0.55, -0.45 }, UT = { -22, 0, 0 }, RUA = { 70, 0, 0 }, RLA = { 0, 0, 0 }, RH = { -12, 0, 0 },
+				LUA = { -30, 0, -50 }, LLA = { 15, 0, 0 }, RUL = { 60, 0, 0 }, RLL = { -52, 0, 0 }, LUL = { -36, 0, 0 }, LLL = { -10, 0, 0 } }, snap = true },
+			{ 0.68, { LT = { -11, 0, 0, 0, -0.6, -0.5 }, UT = { -24, 0, 0 }, RUA = { 64, 0, 0 }, RLA = { 0, 0, 0 }, RH = { -14, 0, 0 },
+				LUA = { -32, 0, -52 }, LLA = { 15, 0, 0 }, RUL = { 62, 0, 0 }, RLL = { -54, 0, 0 }, LUL = { -38, 0, 0 }, LLL = { -10, 0, 0 } } },
+			{ 0.95, READY },
+		},
+	},
+	Ult = { -- long cutscene version (will 2026-11-01): seal + gather qi, raise the blade to the sky, cleave at 3.7 s
+		name = "Ult", dur = 4.6, contact = { 3.7 }, trail = { 3.58, 3.86 }, lunge = { 99, 0 }, heavy = true,
+		fx = { roll = 90, dir = -1, reach = 10 },
+		keys = {
+			{ 0, READY },
+			{ 0.35, { LT = { 6, 30, 0, 0, -0.5, 0.3 }, UT = { 10, 25, 0 }, RUA = { 20, 0, 35 }, RLA = { 40, 0, 0 }, RH = { -10, 0, 0 },
+				LUA = SEAL, LLA = { 100, 0, 0 }, H = { -8, -20, 0 }, RUL = { -10, 0, 0 }, RLL = { -40, 0, 0 }, LUL = { 30, 0, 0 }, LLL = { -45, 0, 0 } } },
+			{ 1.3, { LT = { 7, 32, 0, 0, -0.58, 0.32 }, UT = { 12, 27, 0 }, RUA = { 16, 0, 38 }, RLA = { 44, 0, 0 }, RH = { -12, 0, 0 },
+				LUA = SEAL, LLA = { 104, 0, 0 }, H = { -10, -22, 0 }, RUL = { -12, 0, 0 }, RLL = { -44, 0, 0 }, LUL = { 32, 0, 0 }, LLL = { -48, 0, 0 } } },
+			{ 2.1, { LT = { 5, 20, 0, 0, -0.45, 0.2 }, UT = { 6, 16, 0 }, RUA = { 60, 0, 40 }, RLA = { 30, 0, 0 }, RH = { 0, 0, 0 },
+				LUA = SEAL, LLA = { 100, 0, 0 }, RUL = { -6, 0, 0 }, RLL = { -30, 0, 0 }, LUL = { 22, 0, 0 }, LLL = { -32, 0, 0 } } },
+			{ 2.6, { LT = { -6, 0, 0, 0, 0.05, 0 }, UT = { -15, 0, 0 }, RUA = { 175, 0, 8 }, RLA = { 5, 0, 0 }, RH = { 35, 0, 0 },
+				LUA = SEAL, LLA = { 100, 0, 0 }, H = { -20, 0, 0 }, RUL = { 5, 0, 0 }, RLL = { -5, 0, 0 }, LUL = { -5, 0, 0 }, LLL = { -5, 0, 0 } } },
+			{ 3.55, { LT = { -8, 0, 0, 0, 0.14, 0 }, UT = { -20, 0, 0 }, RUA = { 179, 0, 6 }, RLA = { 3, 0, 0 }, RH = { 40, 0, 0 },
+				LUA = SEAL, LLA = { 104, 0, 0 }, H = { -24, 0, 0 }, RUL = { 4, 0, 0 }, RLL = { -4, 0, 0 }, LUL = { -4, 0, 0 }, LLL = { -4, 0, 0 } } },
+			{ 3.7, { LT = { -10, 0, 0, 0, -0.72, -0.6 }, UT = { -26, 0, 0 }, RUA = { 60, 0, 0 }, RLA = { 0, 0, 0 }, RH = { -15, 0, 0 },
+				LUA = { -30, 0, -50 }, LLA = { 15, 0, 0 }, RUL = { 66, 0, 0 }, RLL = { -56, 0, 0 }, LUL = { -40, 0, 0 }, LLL = { -10, 0, 0 } }, snap = true },
+			{ 4.05, { LT = { -11, 0, 0, 0, -0.76, -0.64 }, UT = { -28, 0, 0 }, RUA = { 56, 0, 0 }, RLA = { 0, 0, 0 }, RH = { -16, 0, 0 },
+				LUA = { -32, 0, -52 }, LLA = { 15, 0, 0 }, RUL = { 68, 0, 0 }, RLL = { -58, 0, 0 }, LUL = { -42, 0, 0 }, LLL = { -10, 0, 0 } } },
+			{ 4.6, READY },
+		},
+	},
+}
+
+-- a click step (1..4) or a skill name ("SkillZ", "SkillX", "Ult")
+function SwordCombo.Get(id)
+	return SwordCombo.CLIPS[id] or SwordCombo.SKILLS[id]
+end
+
 -- head keeps looking forward (counter the hips + chest) unless a key sets H
 local function headFor(v)
 	local lt, ut = v.LT or { 0, 0, 0 }, v.UT or { 0, 0, 0 }
 	return { -(lt[1] + ut[1]) * 0.55, -(lt[2] + ut[2]) * 0.75, -(lt[3] + ut[3]) * 0.6 }
 end
-for _, clip in ipairs(SwordCombo.CLIPS) do
+local allClips = table.clone(SwordCombo.CLIPS)
+for _, c in pairs(SwordCombo.SKILLS) do table.insert(allClips, c) end
+for _, clip in ipairs(allClips) do
 	for _, k in ipairs(clip.keys) do
 		if not k[2].H then
 			local v = table.clone(k[2]); v.H = headFor(v); k[2] = v
@@ -152,7 +217,7 @@ end
 -- Play hit `index` on `char`. hooks: onContact(i, contactIndex), onTrail(on), onLunge(speed), onEnd()
 function SwordCombo.Play(char, index, hooks)
 	hooks = hooks or {}
-	local clip = SwordCombo.CLIPS[index]
+	local clip = SwordCombo.Get(index)
 	if not clip then return end
 	local prev = active[char]
 	if prev then prev.stop(true) end

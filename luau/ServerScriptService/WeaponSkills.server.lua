@@ -21,7 +21,7 @@ local STATS = {
 }
 local CD = {Z = 4, X = 9, G = 28}
 -- jeda sebelum efek keluar, biar pas sama ayunan animasi
-local DELAY = {Z = 0.15, X = 0.25, G = 0}
+local DELAY = {Z = 0.15, X = 0.25, G = 2.45} -- G: the long cutscene, the cleave lands at 2.45 + 1.25 = 3.7 s
 
 local function fx(kind, ...)
 	FxRemote:FireAllClients(kind, ...)
@@ -162,7 +162,7 @@ end
 
 -- G Nine Clouds Thunder: sembilan awan melingkar, sambar satu-satu, lalu menyatu jadi pilar petir raksasa
 function SK.Thunder.G(plr, char, root, aim, el)
-	local center = aimPoint(root, aim, 30, 14)
+	local center = aimPoint(root, aim, 30, 16)
 	task.wait(1.25)
 	fx("NineClouds", center, 15)
 	task.wait(0.7)
@@ -335,7 +335,11 @@ SkillRemote.OnServerEvent:Connect(function(plr, key, aim)
 	if not tool then return end
 	if not ready(plr, el .. key, CD[key] - 0.2) then return end
 	if el == "Thunder" then Glow.pulse(tool, key == "G" and 3 or 2, key == "G" and 4.5 or 1.5) end
-	if key == "G" then fx("UltStart", plr, el) end
+	if key == "G" then
+		-- caster can't be hurt during the cutscene; client set piece gets the same target the skill will hit
+		char:SetAttribute("UltGuardUntil", os.clock() + 6.3)
+		fx("UltStart", plr, el, el == "Lotus" and Core.ground(root.Position) or aimPoint(root, aim, 30, 16))
+	end
 	task.spawn(function()
 		if DELAY[key] > 0 then task.wait(DELAY[key]) end
 		local c2, r2 = charOf(plr)
@@ -406,6 +410,7 @@ end
 -- Lotus Guard: kurangi damage yang masuk
 local rawHurt = Core.damagePlayer
 Core.damagePlayer = function(char, dmg, src, heavy)
+	if char and (char:GetAttribute("UltGuardUntil") or 0) > os.clock() then dmg = 0 end
 	if char and (char:GetAttribute("LotusGuardUntil") or 0) > os.clock() then dmg *= 0.4 end
 	return rawHurt(char, dmg, src, heavy)
 end

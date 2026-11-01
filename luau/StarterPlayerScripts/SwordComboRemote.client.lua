@@ -6,7 +6,7 @@ local relay = RS:WaitForChild("SwordComboRelay")
 
 relay.OnClientEvent:Connect(function(char, tool, step)
 	if typeof(char) ~= "Instance" or typeof(tool) ~= "Instance" or not char.Parent then return end
-	local clip = SwordCombo.CLIPS[step]
+	local clip = SwordCombo.Get(step)
 	if not clip then return end
 	local trails = {}
 	for _, d in ipairs(tool:GetDescendants()) do

@@ -10,7 +10,9 @@ local last = {}
 relay.OnServerEvent:Connect(function(plr, tool, step)
 	local char = plr.Character
 	if typeof(tool) ~= "Instance" or not tool:IsA("Tool") or tool.Parent ~= char then return end
-	if typeof(step) ~= "number" or step % 1 ~= 0 or step < 1 or step > 4 then return end
+	local isStep = typeof(step) == "number" and step % 1 == 0 and step >= 1 and step <= 4
+	local isSkill = step == "SkillZ" or step == "SkillX" or step == "Ult"
+	if not (isStep or isSkill) then return end
 	local now = os.clock()
 	if last[plr] and now - last[plr] < 0.2 then return end
 	last[plr] = now
