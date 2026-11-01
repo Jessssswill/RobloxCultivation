@@ -146,6 +146,28 @@ local function buildChain(tassel, handle)
 	}
 end
 
+-- ground: the tassel may rest on the floor but never sink into it (will 2026-10-31)
+local groundParams = RaycastParams.new()
+groundParams.FilterType = Enum.RaycastFilterType.Exclude
+local groundAt = 0
+local function refreshGroundFilter()
+	local ex = {}
+	for _, pl in ipairs(game:GetService("Players"):GetPlayers()) do
+		if pl.Character then table.insert(ex, pl.Character) end
+	end
+	groundParams.FilterDescendantsInstances = ex
+end
+local function groundY(c, from)
+	local now = os.clock()
+	if not c.groundT or now - c.groundT > 0.1 then
+		if now - groundAt > 1 then groundAt = now; refreshGroundFilter() end
+		local hit = workspace:Raycast(from, Vector3.new(0, -14, 0), groundParams)
+		c.ground = hit and hit.Position.Y or -math.huge
+		c.groundT = now
+	end
+	return c.ground
+end
+
 local function stepChain(c, hcf, wind)
 	local p, q, len = c.p, c.q, c.len
 	local dt = TASSEL.step
@@ -180,6 +202,12 @@ local function stepChain(c, hcf, wind)
 			if m < r then
 				off = m > 1e-5 and off * (r / m) or axis:Cross(Vector3.yAxis).Unit * r
 				p[k] = hcf:PointToWorldSpace(axis * z + off)
+			end
+		end
+		local gy = groundY(c, p[1]) + 0.08
+		for k = 2, #p do
+			if p[k].Y < gy then
+				p[k] = Vector3.new(p[k].X, gy, p[k].Z)
 			end
 		end
 	end
@@ -367,7 +395,7 @@ local function updateHold(char, s, dt, now)
 	if not (animator and upper and lower) then
 		return
 	end
-	local want = actionPlaying(animator) and 0 or 1
+	local want = (actionPlaying(animator) or char:GetAttribute("SwordAttacking")) and 0 or 1
 	s.hold += (want - s.hold) * math.min(1, dt * MOTION.fade)
 	local v = char.PrimaryPart.AssemblyLinearVelocity
 	local speed = Vector3.new(v.X, 0, v.Z).Magnitude
