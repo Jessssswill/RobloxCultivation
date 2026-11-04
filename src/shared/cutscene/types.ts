@@ -4,6 +4,16 @@
 
 export type Ease = "linear" | "in" | "out" | "inOut" | "back" | "expoOut";
 
+/** Tingkat grafik: 0 ringan, 1 sedang, 2 tinggi. Ikut setting grafik pemain (lihat client/cutscene/quality.ts). */
+export type Tier = 0 | 1 | 2;
+
+export interface GradeProps {
+	Brightness: number;
+	Contrast: number;
+	Saturation: number;
+	TintColor: Color3;
+}
+
 export interface CamKey {
 	t: number;
 	/** Posisi kamera. Kalau `follow` diisi, ini offset dari aktor itu. */
@@ -34,9 +44,13 @@ export interface ActorDef {
 	template?: string;
 	color?: Color3;
 	material?: Enum.Material;
-	weapon?: "jian";
+	weapon?: "jian" | "spear";
 	/** Warna bayangan (afterimage) waktu gerak cepat. */
 	ghostColor?: Color3;
+	/** Garis cahaya di pinggir badan (Highlight). Grafik tinggi semua, grafik sedang cuma yang `key`. */
+	outline?: { color: Color3; alpha?: number; key?: boolean };
+	/** Aura qi di badan, dinyalain lewat event "aura". Grafik sedang ke atas. */
+	aura?: Color3;
 	/** CFrame telapak kaki, relatif ke origin. */
 	start: CFrame;
 	hidden?: boolean;
@@ -48,9 +62,19 @@ interface At {
 
 export type CutEvent = At &
 	(
-		| { kind: "sub"; who?: string; text: string; dur: number }
+		/** Subtitle. Kalau `zh` + `voice` diisi, kalimat Mandarin-nya diucapin (TTS Roblox) dan ikut tampil di atas teks Inggris. */
+		| { kind: "sub"; who?: string; text: string; dur: number; zh?: string; voice?: string }
+		/** Cuma suara Mandarin, tanpa subtitle (misal narator pas judul). */
+		| { kind: "voice"; zh: string; voice: string }
 		| { kind: "card"; name: string; cn?: string; epithet?: string; dur: number }
-		| { kind: "title"; text: string; sub?: string; dur: number }
+		| { kind: "title"; text: string; cn?: string; sub?: string; dur: number }
+		/** Ubah grading warna pelan-pelan (misal dunia jadi pucat pas waktu "berhenti"). */
+		| { kind: "grade"; to: Partial<GradeProps>; dur: number }
+		| { kind: "aura"; actor: string; on: boolean }
+		/** Gerakin properti set milik scene (CutsceneDef.props), misal Mata Langit membuka/menutup. */
+		| { kind: "prop"; name: string; to: number; dur: number; ease?: Ease }
+		/** Bekukan partikel set (butiran qi diam di udara) pas momen "waktu berhenti". */
+		| { kind: "freeze"; on: boolean }
 		| { kind: "fade"; to: number; dur: number; color?: Color3 }
 		| { kind: "shake"; mag: number; dur: number }
 		/** Hitstop + impact frame + garis kecepatan + guncangan. Inti rasa donghua. */
@@ -66,7 +90,7 @@ export type CutEvent = At &
 		| { kind: "break"; actor: string }
 		| {
 				kind: "vfx";
-				name: "slash" | "burst" | "ring" | "fall" | "debris" | "collapse";
+				name: "slash" | "burst" | "ring" | "fall" | "debris" | "collapse" | "wave" | "lightning" | "cracks";
 				at: Vector3;
 				to?: Vector3;
 				/** Titik kontrol kurva buat fall (Bezier). */
@@ -78,8 +102,10 @@ export type CutEvent = At &
 				dur?: number;
 				scale?: number;
 				color?: Color3;
+				/** "ink" = lapisan tinta hitam + cipratan tinta (ciri khas pedang Bai Wuji). */
+				style?: "ink";
 		  }
-		| { kind: "sfx"; name: string; volume?: number }
+		| { kind: "sfx"; name: string; volume?: number; pitch?: number; loop?: boolean }
 		| { kind: "music"; name: string; volume?: number; fade?: number }
 	);
 
@@ -94,7 +120,7 @@ export interface CutsceneLook {
 		FogEnd: number;
 	}>;
 	atmosphere?: Partial<{ Density: number; Haze: number; Glare: number; Offset: number; Color: Color3; Decay: Color3 }>;
-	grade?: Partial<{ Brightness: number; Contrast: number; Saturation: number; TintColor: Color3 }>;
+	grade?: Partial<GradeProps>;
 	bloom?: Partial<{ Intensity: number; Size: number; Threshold: number }>;
 	/** Goyang kamera tangan (derajat). Bikin shot gak kaku. */
 	handheld?: number;
@@ -110,8 +136,10 @@ export interface CutsceneDef {
 	anchor?: string;
 	origin: CFrame;
 	look?: CutsceneLook;
-	/** Bikin set greybox lokal (cuma di client yang nonton). `low` = mode ringan (HP / grafik rendah). */
-	build?: (root: Folder, low: boolean) => void;
+	/** Bikin set lokal (cuma di client yang nonton). Detail ikut tier grafik. */
+	build?: (root: Folder, tier: Tier) => void;
+	/** Properti set yang bisa dianimasiin lewat event "prop". `set` dipanggil tiap frame selama tween. */
+	props?: Record<string, { init: number; set: (root: Folder, value: number) => void }>;
 	actors: ActorDef[];
 	camera: CamKey[];
 	events: CutEvent[];

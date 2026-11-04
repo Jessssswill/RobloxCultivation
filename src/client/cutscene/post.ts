@@ -2,7 +2,8 @@
 // Semua nilai lama disimpan dan dibalikin pas cutscene selesai.
 
 import { Lighting } from "@rbxts/services";
-import { CutsceneLook } from "shared/cutscene/types";
+import { CutsceneLook, GradeProps } from "shared/cutscene/types";
+import { Tweens } from "./tweens";
 
 type Snapshot = Array<[Instance, string, unknown]>;
 
@@ -17,7 +18,7 @@ function apply(inst: Instance, props: object, snap: Snapshot) {
 export class Post {
 	private snap: Snapshot = [];
 	private grade: ColorCorrectionEffect;
-	private base: { Brightness: number; Contrast: number; Saturation: number; TintColor: Color3 };
+	private base: GradeProps;
 	private dof?: DepthOfFieldEffect;
 	private impactUntil = 0;
 
@@ -46,6 +47,25 @@ export class Post {
 			dof.Parent = Lighting;
 			this.dof = dof;
 		}
+	}
+
+	/** Geser grading dasar pelan-pelan (waktu timeline). Impact frame tetap bisa nyela. */
+	gradeTo(to: Partial<GradeProps>, dur: number, tw: Tweens) {
+		const from = { ...this.base };
+		const lerp = (a: number, b: number | undefined, k: number) => (b === undefined ? a : a + (b - a) * k);
+		tw.add(dur, (k) => {
+			this.base.Brightness = lerp(from.Brightness, to.Brightness, k);
+			this.base.Contrast = lerp(from.Contrast, to.Contrast, k);
+			this.base.Saturation = lerp(from.Saturation, to.Saturation, k);
+			if (to.TintColor) this.base.TintColor = from.TintColor.Lerp(to.TintColor, k);
+			if (this.impactUntil === 0) this.restoreGrade();
+		});
+	}
+
+	/** Matiin DOF (dipanggil pengaman FPS). */
+	disableDof() {
+		this.dof?.Destroy();
+		this.dof = undefined;
 	}
 
 	/** Fokus ke jarak `dist`. amount 0 = mati (hemat GPU). */
