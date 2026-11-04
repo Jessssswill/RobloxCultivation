@@ -6,8 +6,65 @@ local Debris = game:GetService("Debris")
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
 
 local SwordFX = {}
+
+-- PERFORMANCE (will 2026-11-04: must stay light, especially on phones)
+-- Quality tier per client: 3 = full, 2 = medium, 1 = low. Phones and low graphics settings get 1. Other players' attacks
+-- get one tier less, and nothing at all beyond FAR studs. Player attribute FXQuality (1..3) overrides it (settings menu).
+-- On top of that a rolling budget caps how many effect parts this client may create per 0.25 s, whatever happens.
+local FAR, MID = 140, 70
+SwordFX.BUDGET = {
+	[1] = { steps = 1, ghostEvery = 0, shards = 0.3, streaks = 0.5, ring = 10, bolts = 0.4, flip = 0.5, hz = 30, burst = 60 },
+	[2] = { steps = 3, ghostEvery = 6, shards = 0.6, streaks = 0.75, ring = 18, bolts = 0.7, flip = 0.8, hz = 45, burst = 150 },
+	[3] = { steps = 6, ghostEvery = 3, shards = 1, streaks = 1, ring = 28, bolts = 1, flip = 1, hz = 60, burst = 320 },
+}
+local tierCache, tierAt = 3, -math.huge
+local function deviceTier()
+	if os.clock() - tierAt < 5 then return tierCache end
+	tierAt = os.clock()
+	local lp = Players.LocalPlayer
+	local o = lp and lp:GetAttribute("FXQuality")
+	if typeof(o) == "number" then
+		tierCache = math.clamp(math.floor(o), 1, 3)
+		return tierCache
+	end
+	local mobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+	local ok, q = pcall(function() return UserSettings():GetService("UserGameSettings").SavedQualityLevel end)
+	local lvl = (ok and q) and q.Value or 0 -- 0 = Automatic
+	if lvl == 0 then
+		tierCache = mobile and 1 or 3
+	elseif lvl <= 3 then
+		tierCache = 1
+	elseif lvl <= 6 then
+		tierCache = 2
+	else
+		tierCache = mobile and 2 or 3
+	end
+	return tierCache
+end
+-- 0 = draw nothing
+function SwordFX.TierFor(char)
+	local tier = deviceTier()
+	if Players.LocalPlayer and Players.LocalPlayer.Character == char then return tier end
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local cam = workspace.CurrentCamera
+	if not (root and cam) then return 0 end
+	local d = (root.Position - cam.CFrame.Position).Magnitude
+	if d > FAR then return 0 end
+	if d > MID then return 1 end
+	return math.max(1, tier - 1)
+end
+local spent, windowAt = 0, 0
+local function allow(n, tier)
+	local now = os.clock()
+	if now - windowAt > 0.25 then windowAt, spent = now, 0 end
+	if spent + n > SwordFX.BUDGET[tier].burst then return false end
+	spent += n
+	return true
+end
+local function scaled(n, k) return math.max(1, math.floor(n * k + 0.5)) end
 
 -- workspace attribute SwordFXSlow (debug only) stretches every effect so it can be inspected frame by frame
 local function slow() return workspace:GetAttribute("SwordFXSlow") or 1 end
@@ -149,7 +206,7 @@ local function bolts(f, pos, pal, n)
 end
 
 -- impact: small hot core + a starburst of thin light streaks facing the camera (no solid disks blocking the view)
-local function flash(f, pos, pal, size)
+local function flash(f, pos, pal, size, streakK)
 	local ball = bare(Instance.new("Part"))
 	ball.Shape = Enum.PartType.Ball
 	ball.Material = Enum.Material.Neon
@@ -161,7 +218,7 @@ local function flash(f, pos, pal, size)
 	TweenService:Create(ball, TI(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = Vector3.one * size * 0.35, Transparency = 1 }):Play()
 	local cam = workspace.CurrentCamera
 	local face = CFrame.lookAt(pos, cam.CFrame.Position)
-	local n = math.floor(6 + size)
+	local n = scaled(6 + size, streakK or 1)
 	for i = 1, n do
 		local ang = (i / n) * math.pi * 2 + math.random() * 0.3
 		local len = size * (0.35 + math.random() * 0.45)
@@ -179,14 +236,14 @@ local function flash(f, pos, pal, size)
 end
 
 -- ground shockwave: a ring of glowing blades racing outward along the floor (hollow, so the player still sees the fight)
-local function groundRing(f, root, pal, size)
+local function groundRing(f, root, pal, size, n)
 	local ray = RaycastParams.new()
 	ray.FilterType = Enum.RaycastFilterType.Exclude
 	ray.FilterDescendantsInstances = { root.Parent, f }
 	local hit = workspace:Raycast(root.Position, Vector3.new(0, -8, 0), ray)
 	if not hit then return end
 	local c = hit.Position + Vector3.new(0, 0.1, 0)
-	local n = 28
+	n = n or 28
 	for i = 1, n do
 		local ang = (i / n) * math.pi * 2
 		local base = CFrame.new(c) * CFrame.Angles(0, ang, 0)
@@ -268,14 +325,22 @@ local function glint(f, pos, pal, size)
 end
 
 local sweeping = {}
+-- low tier: two bands instead of three (one third fewer parts, same read)
+local BANDS_LOW = {
+	{ 0.0, 0.75, "main", 0.35, 0.8 },
+	{ 0.75, 1.0, "core", 0.05, 0.85 },
+}
 -- blade bands from guard (0) to tip (1): {from, to, colour, transparency, life multiplier}
 local BANDS = {
 	{ 0.0, 0.4, "deep", 0.65, 0.6 },
 	{ 0.4, 0.8, "main", 0.2, 1 },
 	{ 0.8, 1.0, "core", 0.05, 0.85 },
 }
-local function sweep(char, tool, pal, heavy, element)
+local function sweep(char, tool, pal, heavy, element, tier)
 	if sweeping[tool] then return end
+	local B = SwordFX.BUDGET[tier]
+	local bands = tier == 1 and BANDS_LOW or BANDS
+	local lastLay = 0
 	local part, axis, half = bladeOf(tool)
 	if not part then return end
 	local trails = {}
@@ -305,28 +370,35 @@ local function sweep(char, tool, pal, heavy, element)
 			sweeping[tool] = nil
 			return
 		end
+		-- lay sheets at most B.hz times a second (a 144 Hz screen must not make 2.4x more parts than a 60 Hz one)
+		local now = os.clock()
+		if now - lastLay < 1 / B.hz then return end
+		lastLay = now
 		local b1, t1 = edge()
 		local life = heavy and 0.3 or 0.22
 		-- fast swings move the tip a long way per frame: cut the gap into thin slices and the blade into bands,
 		-- so the sheet follows the real curved path instead of showing big flat rectangles
-		local steps = math.clamp(math.ceil((t1 - t0).Magnitude / 0.6), 1, 6)
+		local steps = math.clamp(math.ceil((t1 - t0).Magnitude / 0.6), 1, B.steps)
+		if not allow(steps * #bands, tier) then b0, t0 = b1, t1 return end
 		for k = 1, steps do
 			local u0, u1 = (k - 1) / steps, k / steps
 			local pb0, pt0 = b0:Lerp(b1, u0), t0:Lerp(t1, u0)
 			local pb1, pt1 = b0:Lerp(b1, u1), t0:Lerp(t1, u1)
-			for _, band in ipairs(BANDS) do
+			for _, band in ipairs(bands) do
 				sheet(f, pb0:Lerp(pt0, band[1]), pb0:Lerp(pt0, band[2]), pb1:Lerp(pt1, band[1]), pb1:Lerp(pt1, band[2]),
 					pal[band[3]], band[4], life * band[5] * (0.75 + 0.25 * u1))
 			end
 		end
-		if element == "Thunder" and math.random() < 0.35 then bolts(f, t1, pal, 1) end
-		if (element == "Ice" or element == "Jade" or element == "Lotus") and (t1 - t0).Magnitude > 0.01 and math.random() < 0.5 then
-			shards(f, t1, (t1 - t0).Unit, pal, 1, 10)
+		if tier >= 2 then
+			if element == "Thunder" and math.random() < 0.35 and allow(5, tier) then bolts(f, t1, pal, 1) end
+			if (element == "Ice" or element == "Jade" or element == "Lotus") and (t1 - t0).Magnitude > 0.01 and math.random() < 0.5 then
+				shards(f, t1, (t1 - t0).Unit, pal, 1, 10)
+			end
+			if element == "Fire" and math.random() < 0.6 then shards(f, t1, Vector3.yAxis, pal, 2, 6) end
 		end
-		if element == "Fire" and math.random() < 0.6 then shards(f, t1, Vector3.yAxis, pal, 2, 6) end
 		-- ghost blades: shimmering copies of the sword left along the cut (afterimages)
 		frame += 1
-		if frame % 3 == 1 then
+		if B.ghostEvery > 0 and frame % B.ghostEvery == 1 and allow(#ghostParts, tier) then
 			for _, src in ipairs(ghostParts) do
 				local g = src:Clone()
 				for _, ch in ipairs(g:GetChildren()) do ch:Destroy() end
@@ -375,6 +447,9 @@ end
 function SwordFX.Spawn(char, tool, clip, phase)
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	if not root then return end
+	local tier = SwordFX.TierFor(char)
+	if tier == 0 then return end
+	local B = SwordFX.BUDGET[tier]
 	local pal = palette(tool)
 	local el = tool and tool:GetAttribute("Element")
 	local f = folderFx()
@@ -383,6 +458,7 @@ function SwordFX.Spawn(char, tool, clip, phase)
 	if phase == "Swing" then
 		if fx.thrust then
 			-- spiral spear of light straight ahead
+			if not allow(3, tier) then return end
 			for i = 1, 3 do
 				local p = bare(Instance.new("Part"))
 				p.Material = Enum.Material.Neon
@@ -396,19 +472,26 @@ function SwordFX.Spawn(char, tool, clip, phase)
 				}):Play()
 			end
 		else
-			sweep(char, tool, pal, clip.heavy, el)
+			sweep(char, tool, pal, clip.heavy, el, tier)
 		end
 	elseif phase == "Contact" then
 		local heavy = clip.heavy
 		local pos = cf:PointToWorldSpace(Vector3.new(0, 0.4, -(fx.reach * 0.62)))
-		flash(f, pos, pal, heavy and 8 or 5)
+		-- the impact is what sells the hit, so it always shows; only its part counts shrink with the tier
+		local nStreak = scaled(6 + (heavy and 8 or 5), B.streaks)
+		local nShard = scaled(heavy and 26 or 14, B.shards)
+		if allow(1 + nStreak, tier) then flash(f, pos, pal, heavy and 8 or 5, B.streaks) end
 		local part, axis, half = bladeOf(tool)
-		if part then glint(f, part.CFrame:PointToWorldSpace(axis * half), pal, heavy and 5 or 3.2) end
-		flipbooks(f, CFrame.lookAt(pos, pos + cf.LookVector) * CFrame.Angles(0, 0, math.rad(fx.roll or 0)), pal, heavy and 2 or 1.3, heavy)
-		shards(f, pos, cf.LookVector, pal, heavy and 26 or 14, heavy and 46 or 32)
-		if el == "Thunder" then bolts(f, pos, pal, heavy and 6 or 3) end
-		if heavy then
-			groundRing(f, root, pal, 22)
+		if part and allow(4, tier) then glint(f, part.CFrame:PointToWorldSpace(axis * half), pal, heavy and 5 or 3.2) end
+		flipbooks(f, CFrame.lookAt(pos, pos + cf.LookVector) * CFrame.Angles(0, 0, math.rad(fx.roll or 0)), pal,
+			(heavy and 2 or 1.3) * B.flip, heavy and tier >= 2)
+		if allow(nShard, tier) then shards(f, pos, cf.LookVector, pal, nShard, heavy and 46 or 32) end
+		if el == "Thunder" then
+			local nb = scaled(heavy and 6 or 3, B.bolts)
+			if allow(nb * 5, tier) then bolts(f, pos, pal, nb) end
+		end
+		if heavy and allow(B.ring, tier) then
+			groundRing(f, root, pal, 22, B.ring)
 		end
 		feel(char, heavy and 1.1 or 0.4, heavy)
 	end

@@ -1,4 +1,7 @@
--- SwordCombo: 4-hit jian combo driven straight onto the R15 joints (Motor6D.Transform), same idea as the Ink Brush.
+-- SwordCombo v4: 4-hit jian combo driven straight onto the R15 joints (Motor6D.Transform), same idea as the Ink Brush.
+-- v4 (2026-11-04): attack while walking (upper-body layer: legs keep the walk cycle, hip twist moves into the waist),
+-- crossfade from the CURRENT pose (no snap back to the ready pose between combo hits), breakdown keys so the blade
+-- travels in an arc with the elbow whipping before the wrist, eased wind-ups.
 -- Why: no animation upload needed (works in the live game), whole body moves, smooth curves, hit-stop.
 -- Every client plays it for every character (the owner locally, others via SwordComboRelay), so all players see it.
 -- Pose values per joint: {pitchX, yawY, rollZ (deg), x, y, z (studs)}; same conventions as assets/Animations/build_jian_v2.lua.
@@ -25,7 +28,7 @@ local READY = { LT = { 0, 10, 0, 0, -0.1, 0 }, UT = { 0, 15, 0 }, RUA = { 45, 0,
 -- contact = hit times; trail = {on, off}; lunge = {time, speed}; fx = slash plane for SwordFX (roll deg, from-side)
 SwordCombo.CLIPS = {
 	{ -- 1. Diagonal cut: upper right -> lower left, step in
-		name = "Diagonal", dur = 0.78, contact = { 0.29 }, trail = { 0.2, 0.42 }, lunge = { 0.22, 22 },
+		name = "Diagonal", move = 0.6, dur = 0.78, contact = { 0.29 }, trail = { 0.2, 0.42 }, lunge = { 0.22, 22 },
 		fx = { roll = -40, dir = -1, reach = 6.5 },
 		keys = {
 			{ 0, READY },
@@ -33,6 +36,7 @@ SwordCombo.CLIPS = {
 				LUA = { 55, 0, -25 }, LLA = { 70, 0, 0 }, LH = { 0, 0, 0 }, RUL = { -6, 0, 0 }, RLL = { -14, 0, 0 }, LUL = { 18, 0, 0 }, LLL = { -22, 0, 0 } } },
 			{ 0.21, { LT = { 0, -20, 0, 0, -0.18, 0.22 }, UT = { 10, -36, 7 }, RUA = { 158, 0, 46 }, RLA = { 76, 0, 0 }, RH = { 30, 0, 0 },
 				LUA = { 58, 0, -28 }, LLA = { 72, 0, 0 }, RUL = { -7, 0, 0 }, RLL = { -15, 0, 0 }, LUL = { 19, 0, 0 }, LLL = { -23, 0, 0 } } },
+			{ 0.255, { LT = { -2, 12, 0, 0, -0.3, -0.2 }, UT = { -6, 12, -3 }, RUA = { 122, 0, 10 }, RLA = { 24, 0, 0 }, RH = { 24, 0, 0 } }, bd = true, ease = "in" },
 			{ 0.29, { LT = { -4, 22, 0, 0, -0.38, -0.55 }, UT = { -12, 30, -8 }, RUA = { 72, 0, -40 }, RLA = { 8, 0, 0 }, RH = { -12, 0, 0 },
 				LUA = { -25, 0, -50 }, LLA = { 20, 0, 0 }, RUL = { 48, 0, 0 }, RLL = { -42, 0, 0 }, LUL = { -28, 0, 0 }, LLL = { -12, 0, 0 } }, snap = true },
 			{ 0.38, { LT = { -6, 28, 0, 0, -0.42, -0.6 }, UT = { -16, 40, -10 }, RUA = { 48, 0, -62 }, RLA = { 18, 0, 0 }, RH = { -18, 0, -8 },
@@ -43,7 +47,7 @@ SwordCombo.CLIPS = {
 		},
 	},
 	{ -- 2. Horizontal backhand: left -> right, low stance, body unwinds
-		name = "Horizontal", dur = 0.74, contact = { 0.27 }, trail = { 0.18, 0.4 }, lunge = { 0.2, 14 },
+		name = "Horizontal", move = 0.6, dur = 0.74, contact = { 0.27 }, trail = { 0.18, 0.4 }, lunge = { 0.2, 14 },
 		fx = { roll = 0, dir = 1, reach = 6.5 },
 		keys = {
 			{ 0, READY },
@@ -51,6 +55,7 @@ SwordCombo.CLIPS = {
 				LUA = { 25, 0, -20 }, LLA = { 75, 0, 0 }, RUL = { 22, 0, 0 }, RLL = { -36, 0, 0 }, LUL = { 14, 0, 0 }, LLL = { -34, 0, 0 } } },
 			{ 0.19, { LT = { 0, 30, 0, 0, -0.42, 0.02 }, UT = { -7, 44, 9 }, RUA = { 86, 0, -78 }, RLA = { 42, 0, 0 }, RH = { 0, 0, -20 },
 				LUA = { 26, 0, -22 }, LLA = { 78, 0, 0 }, RUL = { 23, 0, 0 }, RLL = { -38, 0, 0 }, LUL = { 15, 0, 0 }, LLL = { -36, 0, 0 } } },
+			{ 0.23, { LT = { 0, -6, 0, 0, -0.42, -0.15 }, UT = { -5, -8, 0 }, RUA = { 90, 0, -10 }, RLA = { 14, 0, 0 }, RH = { 0, 0, -14 } }, bd = true, ease = "in" },
 			{ 0.27, { LT = { 0, -24, 0, 0, -0.4, -0.35 }, UT = { -4, -38, -6 }, RUA = { 92, 0, 72 }, RLA = { 4, 0, 0 }, RH = { 0, 0, 16 },
 				LUA = { 30, 0, -60 }, LLA = { 25, 0, 0 }, RUL = { 30, 0, 0 }, RLL = { -30, 0, 0 }, LUL = { -18, 0, 0 }, LLL = { -18, 0, 0 } }, snap = true },
 			{ 0.36, { LT = { 0, -32, 0, 0, -0.42, -0.4 }, UT = { -4, -50, -8 }, RUA = { 90, 0, 88 }, RLA = { 10, 0, 0 }, RH = { 0, 0, 22 },
@@ -61,7 +66,7 @@ SwordCombo.CLIPS = {
 		},
 	},
 	{ -- 3. Rising circle: drop low with the blade behind, rise and carve upward
-		name = "Rising", dur = 0.84, contact = { 0.33 }, trail = { 0.22, 0.46 }, lunge = { 0.25, 12 },
+		name = "Rising", move = 0.55, dur = 0.84, contact = { 0.33 }, trail = { 0.22, 0.46 }, lunge = { 0.25, 12 },
 		fx = { roll = 90, dir = 1, reach = 6 },
 		keys = {
 			{ 0, READY },
@@ -69,6 +74,7 @@ SwordCombo.CLIPS = {
 				LUA = { 60, 0, -30 }, LLA = { 70, 0, 0 }, RUL = { 45, 0, 0 }, RLL = { -75, 0, 0 }, LUL = { 35, 0, 0 }, LLL = { -65, 0, 0 } } },
 			{ 0.24, { LT = { 14, -16, 0, 0, -0.66, 0.16 }, UT = { 20, -28, 6 }, RUA = { -32, 0, 38 }, RLA = { 28, 0, 0 }, RH = { -24, 0, 0 },
 				LUA = { 62, 0, -32 }, LLA = { 72, 0, 0 }, RUL = { 48, 0, 0 }, RLL = { -80, 0, 0 }, LUL = { 38, 0, 0 }, LLL = { -70, 0, 0 } } },
+			{ 0.285, { LT = { 4, -2, 0, 0, -0.3, -0.05 }, UT = { 2, -4, 1 }, RUA = { 60, 0, 34 }, RLA = { 12, 0, 0 }, RH = { -14, 0, 0 } }, bd = true, ease = "in" },
 			{ 0.33, { LT = { -8, 8, 0, 0, 0.12, -0.3 }, UT = { -18, 10, -4 }, RUA = { 165, 0, 18 }, RLA = { 8, 0, 0 }, RH = { 25, 0, 0 },
 				LUA = { -30, 0, -55 }, LLA = { 15, 0, 0 }, RUL = { 20, 0, 0 }, RLL = { -10, 0, 0 }, LUL = { -25, 0, 0 }, LLL = { -15, 0, 0 } }, snap = true },
 			{ 0.42, { LT = { -10, 12, 0, 0, 0.28, -0.35 }, UT = { -22, 14, -6 }, RUA = { 178, 0, -8 }, RLA = { 14, 0, 0 }, RH = { 35, 0, 0 },
@@ -79,7 +85,7 @@ SwordCombo.CLIPS = {
 		},
 	},
 	{ -- 4. Step thrust (finisher): coil back with sword-finger forward, explode into a deep lunge
-		name = "Thrust", dur = 1.0, contact = { 0.38 }, trail = { 0.3, 0.52 }, lunge = { 0.3, 34 }, heavy = true,
+		name = "Thrust", move = 0.3, dur = 1.0, contact = { 0.38 }, trail = { 0.3, 0.52 }, lunge = { 0.3, 34 }, heavy = true,
 		fx = { thrust = true, reach = 9 },
 		keys = {
 			{ 0, READY },
@@ -87,6 +93,7 @@ SwordCombo.CLIPS = {
 				LUA = { 85, 0, -5 }, LLA = { 5, 0, 0 }, LH = { 0, 0, 0 }, RUL = { -10, 0, 0 }, RLL = { -30, 0, 0 }, LUL = { 25, 0, 0 }, LLL = { -35, 0, 0 } } },
 			{ 0.3, { LT = { 6, 38, 0, 0, -0.36, 0.42 }, UT = { 8, 34, 0 }, RUA = { 8, 0, 32 }, RLA = { 108, 0, 0 }, RH = { -18, 0, 0 },
 				LUA = { 88, 0, -4 }, LLA = { 3, 0, 0 }, RUL = { -12, 0, 0 }, RLL = { -34, 0, 0 }, LUL = { 28, 0, 0 }, LLL = { -40, 0, 0 } } },
+			{ 0.34, { LT = { 0, 8, 0, 0, -0.5, -0.3 }, UT = { -4, 0, 0 }, RUA = { 60, 0, 14 }, RLA = { 50, 0, 0 }, RH = { -12, 0, 0 } }, bd = true, ease = "in" },
 			{ 0.38, { LT = { -8, -18, 0, 0, -0.55, -1.0 }, UT = { -14, -25, 0 }, RUA = { 94, 0, 4 }, RLA = { 0, 0, 0 }, RH = { -4, 0, 0 },
 				LUA = { -35, 0, -60 }, LLA = { 10, 0, 0 }, RUL = { 62, 0, 0 }, RLL = { -50, 0, 0 }, LUL = { -38, 0, 0 }, LLL = { -8, 0, 0 } }, snap = true },
 			{ 0.5, { LT = { -9, -20, 0, 0, -0.6, -1.08 }, UT = { -16, -28, 0 }, RUA = { 96, 0, 2 }, RLA = { 0, 0, 0 }, RH = { -4, 0, 0 },
@@ -103,7 +110,7 @@ SwordCombo.CLIPS = {
 local SEAL = { 80, 0, -45 }
 SwordCombo.SKILLS = {
 	SkillZ = {
-		name = "SkillZ", dur = 0.7, contact = { 0.24 }, trail = { 0.17, 0.34 }, lunge = { 99, 0 },
+		name = "SkillZ", plant = true, dur = 0.7, contact = { 0.24 }, trail = { 0.17, 0.34 }, lunge = { 99, 0 },
 		fx = { thrust = true, reach = 9 },
 		keys = {
 			{ 0, READY },
@@ -117,7 +124,7 @@ SwordCombo.SKILLS = {
 		},
 	},
 	SkillX = {
-		name = "SkillX", dur = 0.95, contact = { 0.52 }, trail = { 0.43, 0.64 }, lunge = { 99, 0 },
+		name = "SkillX", plant = true, dur = 0.95, contact = { 0.52 }, trail = { 0.43, 0.64 }, lunge = { 99, 0 },
 		fx = { roll = 90, dir = -1, reach = 7.5 },
 		keys = {
 			{ 0, READY },
@@ -133,7 +140,7 @@ SwordCombo.SKILLS = {
 		},
 	},
 	Ult = { -- long cutscene version (will 2026-11-01): seal + gather qi, raise the blade to the sky, cleave at 3.7 s
-		name = "Ult", dur = 4.6, contact = { 3.7 }, trail = { 3.58, 3.86 }, lunge = { 99, 0 }, heavy = true,
+		name = "Ult", plant = true, dur = 4.6, contact = { 3.7 }, trail = { 3.58, 3.86 }, lunge = { 99, 0 }, heavy = true,
 		fx = { roll = 90, dir = -1, reach = 10 },
 		keys = {
 			{ 0, READY },
@@ -168,6 +175,24 @@ local function headFor(v)
 end
 local allClips = table.clone(SwordCombo.CLIPS)
 for _, c in pairs(SwordCombo.SKILLS) do table.insert(allClips, c) end
+-- breakdown keys (bd = true) only list the joints that matter for the arc; fill the rest in between the neighbours
+for _, clip in ipairs(allClips) do
+	for ki, k in ipairs(clip.keys) do
+		if k.bd then
+			local a, b = clip.keys[ki - 1], clip.keys[ki + 1]
+			local u = (k[1] - a[1]) / (b[1] - a[1])
+			local v = table.clone(k[2])
+			for j in pairs(JOINT) do
+				if not v[j] and (a[2][j] or b[2][j]) then
+					local pa, pb, out = a[2][j] or {}, b[2][j] or {}, {}
+					for i = 1, 6 do out[i] = (pa[i] or 0) + ((pb[i] or 0) - (pa[i] or 0)) * u end
+					v[j] = out
+				end
+			end
+			k[2] = v
+		end
+	end
+end
 for _, clip in ipairs(allClips) do
 	for _, k in ipairs(clip.keys) do
 		if not k[2].H then
@@ -177,7 +202,8 @@ for _, clip in ipairs(allClips) do
 end
 
 local function chan(v, i) return v and v[i] or 0 end
-local function snapEase(t) return 1 - (1 - t) ^ 3 end
+local function snapEase(t) return 1 - (1 - t) ^ 3 end -- fast start, soft landing (the cut)
+local function inEase(t) return t * t end -- slow start, accelerating (leaving a wind-up hold)
 
 -- Catmull-Rom through the keys of one joint/channel (velocity carries through each pose = no robotic stops)
 local function sample(clip, j, i, t)
@@ -189,7 +215,7 @@ local function sample(clip, j, i, t)
 	while k < n - 1 and t > keys[k + 1][1] do k += 1 end
 	local a, b = keys[k], keys[k + 1]
 	local u = (t - a[1]) / math.max(1e-4, b[1] - a[1])
-	if b.snap then u = snapEase(u) end
+	if b.snap then u = snapEase(u) elseif b.ease == "in" then u = inEase(u) end
 	local p0 = chan((keys[k - 1] or a)[2][j], i)
 	local p1, p2 = chan(a[2][j], i), chan(b[2][j], i)
 	local p3 = chan((keys[k + 2] or b)[2][j], i)
@@ -205,6 +231,11 @@ end
 
 local active = {} -- [character] = player state
 
+-- lower body: these follow the clip only while standing; while walking the legs keep the Animator's walk cycle
+local LOWER = { LT = true, RUL = true, LUL = true, RLL = true, LLL = true, RF = true, LF = true }
+local FADE_IN = 0.09 -- crossfade from whatever pose the joint is in now (previous combo hit, walk, idle)
+local FADE_OUT = 0.2
+
 local function findJoints(char)
 	local out = {}
 	for short, name in pairs(JOINT) do
@@ -212,6 +243,18 @@ local function findJoints(char)
 		if m and (m:IsA("Motor6D") or m:IsA("AnimationConstraint")) then out[short] = m end
 	end
 	return out
+end
+
+-- walking = moving on the ground. Uses velocity (not MoveDirection) so it also works for other players' characters.
+local function isWalking(root, hum)
+	if not (root and hum) or hum.FloorMaterial == Enum.Material.Air then return false end
+	local v = root.AssemblyLinearVelocity
+	return v.X * v.X + v.Z * v.Z > 2.5 * 2.5
+end
+
+local function smooth(w)
+	w = math.clamp(w, 0, 1)
+	return w * w * (3 - 2 * w)
 end
 
 -- Play hit `index` on `char`. hooks: onContact(i, contactIndex), onTrail(on), onLunge(speed), onEnd()
@@ -222,7 +265,16 @@ function SwordCombo.Play(char, index, hooks)
 	local prev = active[char]
 	if prev then prev.stop(true) end
 	local joints = findJoints(char)
-	local st = { t = 0, freeze = 0, done = false }
+	local from = {}
+	for short, m in pairs(joints) do from[short] = m.Transform end
+	local planted = clip.plant or false
+	local root = char:FindFirstChild("HumanoidRootPart")
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	-- legW: 1 = legs follow the clip (standing), 0 = legs keep walking. Carried over from the previous hit so a chain never pops.
+	local st = { t = 0, freeze = 0, done = false, legW = prev and prev.legW or ((planted or not isWalking(root, hum)) and 1 or 0) }
+	-- chained hit: blend straight from the previous follow-through into this wind-up instead of passing through the ready
+	-- pose, so the four cuts read as one flowing sword form
+	local fadeInTime = prev and math.max(FADE_IN, clip.keys[2][1] * 0.85) or FADE_IN
 	active[char] = st
 	char:SetAttribute("SwordAttacking", true)
 	local fired, trailOn, lunged = {}, false, false
@@ -239,7 +291,8 @@ function SwordCombo.Play(char, index, hooks)
 	function st.hitStop(sec) st.freeze = math.max(st.freeze, sec) end
 	conn = RunService.PreSimulation:Connect(function(dt)
 		if not char.Parent then st.stop() return end
-		dt = math.min(dt, 1 / 20) * (workspace:GetAttribute("SwordComboTimeScale") or 1)
+		local realDt = math.min(dt, 1 / 20)
+		dt = realDt * (workspace:GetAttribute("SwordComboTimeScale") or 1)
 		if st.freeze > 0 then
 			st.freeze -= dt
 			dt *= 0.06 -- hit-stop: nearly frozen, not dead still
@@ -260,14 +313,28 @@ function SwordCombo.Play(char, index, hooks)
 			lunged = true
 			if hooks.onLunge then hooks.onLunge(clip.lunge[2]) end
 		end
-		-- blend in fast, blend out over the last 0.18 s back into whatever the Animator is playing
-		local w = math.min(1, t / 0.06, (clip.dur - t) / 0.18)
-		w = math.clamp(w, 0, 1)
-		w = w * w * (3 - 2 * w)
+		-- upper-body layer: ease the legs between "clip" and "walk cycle" (~0.15 s) as the player starts/stops moving
+		local wantLeg = (planted or not isWalking(root, hum)) and 1 or 0
+		st.legW += math.clamp(wantLeg - st.legW, -realDt * 7, realDt * 7)
+		local legW = smooth(st.legW)
+		local walkW = 1 - legW
+		local fadeIn = smooth(t / fadeInTime)
+		local fadeOut = smooth((clip.dur - t) / FADE_OUT)
+		-- while walking the hips can't twist (it would twist the legs), so the twist goes into the waist instead
+		local twist = CFrame.identity
+		if walkW > 0.001 then
+			local rx, ry = poseAt(clip, "LT", math.max(0, t - (LAG.LT or 0))):ToEulerAnglesYXZ()
+			twist = CFrame.Angles(rx * 0.5 * walkW, ry * 0.85 * walkW, 0)
+		end
 		for short, m in pairs(joints) do
 			local lag = LAG[short] or 0.03
 			local pose = poseAt(clip, short, math.max(0, t - lag))
-			m.Transform = w >= 0.999 and pose or m.Transform:Lerp(pose, w)
+			local anim = m.Transform -- what the Animator wrote this frame (walk/idle/hold)
+			if short == "UT" then pose = twist * pose end
+			if LOWER[short] and legW < 0.999 then pose = anim:Lerp(pose, legW) end
+			if fadeIn < 0.999 then pose = from[short]:Lerp(pose, fadeIn) end
+			if fadeOut < 0.999 then pose = anim:Lerp(pose, fadeOut) end
+			m.Transform = pose
 		end
 		if t >= clip.dur then st.stop() end
 	end)

@@ -8,6 +8,10 @@ relay.OnClientEvent:Connect(function(char, tool, step)
 	if typeof(char) ~= "Instance" or typeof(tool) ~= "Instance" or not char.Parent then return end
 	local clip = SwordCombo.Get(step)
 	if not clip then return end
+	-- far away (or on a phone in a crowded fight): don't spend frames animating a character you can barely see
+	local root = char:FindFirstChild("HumanoidRootPart")
+	local cam = workspace.CurrentCamera
+	if not root or (cam and (root.Position - cam.CFrame.Position).Magnitude > 160) then return end
 	local trails = {}
 	for _, d in ipairs(tool:GetDescendants()) do
 		if d:IsA("Trail") then table.insert(trails, d) end

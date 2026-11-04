@@ -1,4 +1,5 @@
--- WeaponCombo v3 (jian): 4-hit combo, whole body driven by ReplicatedStorage.SwordCombo (no uploaded animation needed),
+-- WeaponCombo v4 (jian): attack while walking (slowed walk, legs keep walking, upper body swings; will 2026-11-04).
+-- v3: 4-hit combo, whole body driven by ReplicatedStorage.SwordCombo (no uploaded animation needed),
 -- thick element slash effects from ReplicatedStorage.SwordFX, hit-stop, lunge. Other players see it via SwordComboRelay.
 -- Damage stays on the server (ComboServer in this tool, remote "Hit").
 local tool = script.Parent
@@ -63,7 +64,8 @@ attack = function()
 	local clip = SwordCombo.CLIPS[i]
 	relay:FireServer(tool, i)
 	savedSpeed = savedSpeed or hum.WalkSpeed
-	hum.WalkSpeed = 0 -- stand still while swinging (will 2026-11-01)
+	-- keep walking while swinging, just slower (light hits ~60 %, the finisher ~30 %), Ink Brush / Type Soul style
+	hum.WalkSpeed = savedSpeed * (clip.move or 0.6)
 	-- next click is accepted a little after contact so the combo flows without cutting the follow-through short
 	chainAt = os.clock() + clip.contact[#clip.contact] + 0.16
 	local mine
