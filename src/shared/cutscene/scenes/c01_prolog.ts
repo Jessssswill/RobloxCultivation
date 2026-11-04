@@ -1,7 +1,8 @@
 // Cutscene 1 (Prolog, 90 dtk timeline, sekitar 97 dtk asli karena slow-mo):
 // Bai Wuji lawan pasukan langit di Pilar Kesembilan, ditahan sosok diam pakai dua jari, pedang patah,
 // serpihan jatuh menembus awan ke dunia fana. Set dibikin lokal di langit, jauh dari map, detail ikut tier grafik.
-// Dialog Inggris + Mandarin (diucapin TTS). Timing, pose, dan posisi kamera masih wajib dicek dan disetel di Studio.
+// Dialog Inggris + Mandarin (diucapin TTS). Musik orkestra China tanpa vokal (lihat audio.ts).
+// Posisi tusukan vs dua jari dan napak kaki tiap pose udah diukur di Studio (4 Nov); timing kamera tetap cek pas nonton.
 
 import { TEX } from "../audio";
 import { block, light, pillar } from "../build";
@@ -19,17 +20,24 @@ const BRONZE = Color3.fromRGB(150, 112, 60);
 const LACQUER = Color3.fromRGB(92, 30, 24);
 const BANNER = Color3.fromRGB(150, 28, 26);
 const BOLT = Color3.fromRGB(225, 232, 255);
+/** Tepi retakan / sobekan ruang: putih keunguan, beda sama qi biru Bai Wuji. */
+const VOIDRIM = Color3.fromRGB(205, 190, 255);
 
 const v = (x: number, y: number, z: number) => new Vector3(x, y, z);
 /** CFrame telapak kaki di (x, y, z) menghadap titik (lx, lz) pada ketinggian yang sama. */
 const at = (x: number, y: number, z: number, lx: number, lz: number) => CFrame.lookAt(v(x, y, z), v(lx, y, lz));
-/** Hero menghadap -Z sambil diputar (derajat, searah jarum jam dilihat dari atas). */
-const spin = (deg: number) => CFrame.Angles(0, math.rad(-deg), 0);
+
+// Titik ujung pedang dijepit dua jari Sosok Diam. Diukur di Studio 4 Nov (rig Bai tinggi 1.05 pose thrust di THRUST,
+// rig Sosok 1.08 pose twoFinger di at(0, 35, -44)): ujung bilah pas di ujung jari kanan Sosok.
+const PINCH = v(-1.47, 39.45, -42.05);
+const THRUST = at(-2.9, 35.9, -34.85, -2.9, -100);
+/** Retakan utama pas waktu berhenti: sedikit di belakang jari (dari arah kamera close-up) biar tangan + bilah di depannya. */
+const PINCH_CRACK = PINCH.add(v(0.66, -0.13, -0.43));
 
 // Serpihan pedang: dilempar lewat pinggir pulau, terus jatuh menembus awan ke desa di bawah (kurva Bezier)
 const FALL_T0 = 66;
 const FALL_T1 = 82;
-const P0 = v(0, 38.5, -41.5);
+const P0 = PINCH;
 const P1 = v(10, 110, 320);
 const P2 = v(40, -420, 520);
 const bezier = (s: number) => P0.mul((1 - s) ** 2).add(P1.mul(2 * (1 - s) * s)).add(P2.mul(s * s));
@@ -331,12 +339,12 @@ const camera: CamKey[] = [
 	// S11 41-46.5: sosok diam muncul, over-shoulder dari belakang Bai Wuji
 	{ t: 41, follow: "bai", pos: v(2.4, 2, 5.5), track: "figure", look: v(0, 1.5, 0), fov: 45, dof: 0.5, cut: true },
 	{ t: 46.5, follow: "bai", pos: v(1.8, 1.8, 4.5), track: "figure", look: v(0, 1.5, 0), fov: 38, dof: 0.5, ease: "inOut" },
-	// S12 46.5-47.6: tusukan, dari samping
-	{ t: 46.5, pos: v(10, 38, -40), look: v(0, 38, -40), fov: 55, cut: true },
-	{ t: 47.6, pos: v(8, 38.5, -41), look: v(0, 38.5, -41.5), fov: 45, ease: "out" },
-	// S13 47.6-54: close-up ujung pedang dijepit dua jari. Hening
-	{ t: 47.6, follow: "figure", pos: v(2.4, 1.6, 2.2), track: "figure", look: v(0, 1.3, 1.8), fov: 24, dof: 0.8, cut: true },
-	{ t: 54, follow: "figure", pos: v(1.9, 1.45, 2.4), track: "figure", look: v(0, 1.3, 1.8), fov: 18, dof: 0.8, ease: "inOut" },
+	// S12 46.5-47.6: tusukan, dari samping (Bai di kiri layar, Sosok di kanan)
+	{ t: 46.5, pos: v(9, 39.8, -38.5), look: v(-1.5, 39.2, -38.5), fov: 55, cut: true },
+	{ t: 47.6, pos: v(7.2, 39.7, -39.8), look: v(-1.47, 39.45, -40.8), fov: 46, ease: "out" },
+	// S13 47.6-54: close-up ujung pedang dijepit dua jari, dari sisi luar tangan (jubah Sosok blur di belakang). Hening
+	{ t: 47.6, pos: PINCH.add(v(-2.3, 0.45, 1.5)), look: PINCH, fov: 24, dof: 0.8, cut: true },
+	{ t: 54, pos: PINCH.add(v(-1.75, 0.35, 1.15)), look: PINCH, fov: 18, dof: 0.8, ease: "inOut" },
 	// S14 54-60: pedang patah, terpental, jatuh
 	{ t: 54, pos: v(-22, 30, -10), look: v(0, 30, -25), fov: 65, cut: true },
 	{ t: 56.5, pos: v(-14, 8, 30), look: v(0, 3, 12), fov: 60, ease: "out" },
@@ -361,11 +369,18 @@ const camera: CamKey[] = [
 
 const BASE_GRADE = { Brightness: 0, Contrast: 0.15, Saturation: 0.05, TintColor: Color3.fromRGB(255, 244, 230) };
 
+const soldiers = ["s1", "s2", "s3", "s4", "s5", "s6"];
+const each = (ids: string[], f: (id: string) => CutEvent) => ids.map(f);
+
 const events: CutEvent[] = [
 	{ t: 0, kind: "fade", to: 1, dur: 0 },
 	{ t: 0.2, kind: "fade", to: 0, dur: 3 },
-	{ t: 0, kind: "music", name: "prologWar", volume: 0.55, fade: 3 },
+	// Orkestra China tanpa vokal, dipotong dari detik 22.8 biar klimaksnya jatuh pas tebasan raksasa
+	{ t: 0, kind: "music", name: "prologWar", volume: 0.55, fade: 3, from: 22.8 },
 	{ t: 0, kind: "sfx", name: "wind", volume: 0.25, loop: true },
+	...each(soldiers, (id) => ({ t: 0, kind: "pose", actor: id, pose: "attention", dur: 0 })),
+	// Sosok Diam gak pernah napas atau goyang sedikit pun
+	{ t: 0, kind: "still", actor: "figure", on: true },
 	{ t: 1.2, kind: "prop", name: "eye", to: 1, dur: 3.5, ease: "inOut" },
 	{ t: 1.8, kind: "sub", text: "Ten thousand years ago. The Ninth Pillar.", zh: "一万年前，第九天柱。", voice: "narrator", dur: 4 },
 	{ t: 3.2, kind: "vfx", name: "lightning", at: v(100, 450, -300), to: v(31, 200, -262), scale: 2.5, color: BOLT },
@@ -395,47 +410,49 @@ const events: CutEvent[] = [
 	{ t: 13.6, kind: "vfx", name: "lightning", at: v(80, 310, -250), to: v(31, 140, -258), scale: 1.4, color: BOLT },
 	{ t: 16.5, kind: "sub", who: "Bai Wuji", text: "Heaven has never once asked for mine.", zh: "天道……何曾求过我的宽恕？", voice: "bai", dur: 3 },
 
-	// Serbuan pertama + tebasan
+	// Serbuan pertama: prajurit lari beneran (siklus langkah dari kecepatan), tombak maju, terus dihempas satu tebasan
 	{ t: 19.5, kind: "move", actor: "s1", to: at(-3.5, 0, -5.5, 0, 0), dur: 3.8, ease: "in", ghost: true },
 	{ t: 19.5, kind: "move", actor: "s2", to: at(0, 0, -6.5, 0, 0), dur: 3.9, ease: "in", ghost: true },
 	{ t: 19.5, kind: "move", actor: "s3", to: at(3.5, 0, -5.5, 0, 0), dur: 3.7, ease: "in", ghost: true },
+	...each(["s1", "s2", "s3"], (id) => ({ t: 19.5, kind: "pose", actor: id, pose: "charge", dur: 0.4, ease: "out" })),
 	{ t: 19.6, kind: "sfx", name: "whoosh", volume: 0.5, pitch: 0.8 },
-	{ t: 20.5, kind: "pose", actor: "s1", pose: "thrust", dur: 1.5 },
-	{ t: 20.5, kind: "pose", actor: "s2", pose: "thrust", dur: 1.5 },
-	{ t: 20.5, kind: "pose", actor: "s3", pose: "thrust", dur: 1.5 },
 	{ t: 20.5, kind: "lines", dur: 3 },
+	...each(["s1", "s2", "s3"], (id) => ({ t: 22.5, kind: "pose", actor: id, pose: "thrust", dur: 0.5, ease: "out" })),
+	{ t: 22.6, kind: "pose", actor: "bai", pose: "drawStance", dur: 0.6, ease: "inOut" },
 	{ t: 23.2, kind: "aura", actor: "bai", on: true },
-	{ t: 23.4, kind: "pose", actor: "bai", pose: "slashWindup", dur: 0.2, ease: "out" },
+	{ t: 23.3, kind: "glint", actor: "bai" },
+	{ t: 23.45, kind: "pose", actor: "bai", pose: "slashWindup", dur: 0.22, ease: "out" },
 	{ t: 23.75, kind: "pose", actor: "bai", pose: "slashFollow", dur: 0.12, ease: "back" },
+	{ t: 23.75, kind: "move", actor: "bai", to: at(0, 0, -1.6, 0, -100), dur: 0.14, ease: "expoOut", ghost: true },
 	{ t: 23.75, kind: "sfx", name: "slash", volume: 0.9 },
 	{ t: 23.75, kind: "vfx", name: "slash", at: v(-7, 4.5, -5), to: v(7, 2.5, -6), color: QI, style: "ink" },
+	// Ruang ikut kesobek di jalur tebasan
+	{ t: 23.78, kind: "vfx", name: "rift", at: v(-7, 4.5, -5.4), to: v(7, 2.5, -6.4), color: VOIDRIM, scale: 0.6, life: 0.7 },
 	{ t: 23.8, kind: "impact", strength: 1 },
 	{ t: 23.8, kind: "vfx", name: "burst", at: v(-3.5, 3, -5.5), color: GOLD },
 	{ t: 23.82, kind: "vfx", name: "burst", at: v(0, 3, -6.5), color: GOLD },
 	{ t: 23.84, kind: "vfx", name: "burst", at: v(3.5, 3, -5.5), color: GOLD },
-	{ t: 23.85, kind: "hide", actor: "s1" },
-	{ t: 23.85, kind: "hide", actor: "s2" },
-	{ t: 23.85, kind: "hide", actor: "s3" },
+	{ t: 23.82, kind: "knock", actor: "s1", dir: v(-0.6, 0.15, -1), power: 38, fade: 0.8 },
+	{ t: 23.84, kind: "knock", actor: "s2", dir: v(0, 0.2, -1), power: 42, fade: 0.8 },
+	{ t: 23.86, kind: "knock", actor: "s3", dir: v(0.6, 0.15, -1), power: 38, fade: 0.8 },
 	{ t: 23.9, kind: "speed", scale: 0.35 },
 	{ t: 24, kind: "vfx", name: "ring", at: v(0, 0.3, 0), scale: 36, color: QI },
 	{ t: 24.6, kind: "speed", scale: 1 },
 	{ t: 25, kind: "pose", actor: "bai", pose: "guard", dur: 1, ease: "inOut" },
+	{ t: 25.2, kind: "move", actor: "bai", to: at(0, 0, 0, 0, -100), dur: 1, ease: "inOut" },
 	{ t: 25.3, kind: "aura", actor: "bai", on: false },
 
-	// Serbuan kedua dari tiga arah + tebasan putar
+	// Serbuan kedua dari tiga arah + tebasan putar (badan muter penuh, bilah datar nyapu lingkaran)
 	{ t: 26.8, kind: "sub", who: "Heavenly Commander", text: "All of you. Bring him down!", zh: "众将听令，拿下他！", voice: "commander", dur: 2.5 },
 	{ t: 27, kind: "move", actor: "s4", to: at(-4, 0, -1, 0, 0), dur: 1.9, ease: "in", ghost: true },
 	{ t: 27, kind: "move", actor: "s5", to: at(4, 0, -1, 0, 0), dur: 1.9, ease: "in", ghost: true },
 	{ t: 27, kind: "move", actor: "s6", to: at(0, 0, 4.5, 0, 0), dur: 1.9, ease: "in", ghost: true },
-	{ t: 27.5, kind: "pose", actor: "s4", pose: "thrust", dur: 1 },
-	{ t: 27.5, kind: "pose", actor: "s5", pose: "thrust", dur: 1 },
-	{ t: 27.5, kind: "pose", actor: "s6", pose: "thrust", dur: 1 },
+	...each(["s4", "s5", "s6"], (id) => ({ t: 27, kind: "pose", actor: id, pose: "charge", dur: 0.4, ease: "out" })),
+	...each(["s4", "s5", "s6"], (id) => ({ t: 28.3, kind: "pose", actor: id, pose: "thrust", dur: 0.4, ease: "out" })),
+	{ t: 28.5, kind: "pose", actor: "bai", pose: "spinReady", dur: 0.3, ease: "out" },
 	{ t: 28.7, kind: "aura", actor: "bai", on: true },
-	{ t: 28.9, kind: "pose", actor: "bai", pose: "slashWindup", dur: 0.15, ease: "out" },
-	{ t: 29.05, kind: "pose", actor: "bai", pose: "slashFollow", dur: 0.1, ease: "back" },
-	{ t: 29.05, kind: "move", actor: "bai", to: spin(120), dur: 0.1 },
-	{ t: 29.15, kind: "move", actor: "bai", to: spin(240), dur: 0.1 },
-	{ t: 29.25, kind: "move", actor: "bai", to: spin(360), dur: 0.1 },
+	{ t: 29.05, kind: "pose", actor: "bai", pose: "spinSlash", dur: 0.1, ease: "back" },
+	{ t: 29.05, kind: "move", actor: "bai", to: at(0, 0, 0, 0, -100), dur: 0.34, ease: "out", ghost: true, spin: -360 },
 	{ t: 29.1, kind: "sfx", name: "slash", volume: 0.9, pitch: 1.1 },
 	{ t: 29.1, kind: "sfx", name: "whoosh", volume: 0.5, pitch: 1.2 },
 	{ t: 29.1, kind: "vfx", name: "ring", at: v(0, 3, 0), scale: 22, color: QI },
@@ -445,97 +462,115 @@ const events: CutEvent[] = [
 	{ t: 29.25, kind: "vfx", name: "burst", at: v(-4, 3, -1), color: GOLD },
 	{ t: 29.27, kind: "vfx", name: "burst", at: v(4, 3, -1), color: GOLD },
 	{ t: 29.29, kind: "vfx", name: "burst", at: v(0, 3, 4.5), color: GOLD },
-	{ t: 29.3, kind: "hide", actor: "s4" },
-	{ t: 29.3, kind: "hide", actor: "s5" },
-	{ t: 29.3, kind: "hide", actor: "s6" },
+	{ t: 29.26, kind: "knock", actor: "s4", dir: v(-1, 0.2, 0), power: 40, fade: 0.8 },
+	{ t: 29.27, kind: "knock", actor: "s5", dir: v(1, 0.2, 0), power: 40, fade: 0.8 },
+	{ t: 29.28, kind: "knock", actor: "s6", dir: v(0, 0.2, 1), power: 40, fade: 0.8 },
 	{ t: 29.3, kind: "speed", scale: 0.3 },
 	{ t: 29.9, kind: "speed", scale: 1 },
 	{ t: 30, kind: "pose", actor: "bai", pose: "guard", dur: 0.8, ease: "inOut" },
 	{ t: 30.4, kind: "aura", actor: "bai", on: false },
 
-	// Lompat ke langit, gelombang tebasan raksasa menghempas seluruh pasukan
+	// Lompat ke langit sambil muter, sayap cahaya mekar, tebasan raksasa nyobek langit dan menghempas seluruh pasukan
 	{ t: 31.2, kind: "aura", actor: "bai", on: true },
 	{ t: 31.2, kind: "pose", actor: "bai", pose: "crouch", dur: 0.35, ease: "out" },
 	{ t: 31.6, kind: "sfx", name: "whoosh", volume: 0.8 },
 	{ t: 31.6, kind: "sfx", name: "thud", volume: 0.6 },
-	{ t: 31.6, kind: "pose", actor: "bai", pose: "guard", dur: 0.4, ease: "out" },
-	{ t: 31.6, kind: "move", actor: "bai", to: at(0, 35, -30, 0, -200), dur: 1.6, ease: "expoOut", ghost: true },
+	{ t: 31.6, kind: "pose", actor: "bai", pose: "leapTuck", dur: 0.25, ease: "out" },
+	{ t: 31.6, kind: "move", actor: "bai", to: at(0, 35, -30, 0, -200), dur: 1.6, ease: "expoOut", ghost: true, spin: -360 },
 	{ t: 31.6, kind: "vfx", name: "debris", at: v(0, 0, 0) },
 	{ t: 31.6, kind: "vfx", name: "cracks", at: v(0, 0, 0), scale: 1.2, color: QI },
 	{ t: 31.6, kind: "vfx", name: "ring", at: v(0, 0.3, 0), scale: 30, color: SALT },
 	{ t: 31.65, kind: "shake", mag: 0.8, dur: 0.5 },
-	{ t: 33.6, kind: "pose", actor: "bai", pose: "slashWindup", dur: 0.5, ease: "out" },
-	{ t: 34.3, kind: "pose", actor: "bai", pose: "slashFollow", dur: 0.14, ease: "back" },
+	{ t: 32.6, kind: "pose", actor: "bai", pose: "hover", dur: 0.8, ease: "inOut" },
+	{ t: 33.3, kind: "pose", actor: "bai", pose: "overhead", dur: 0.45, ease: "out" },
+	{ t: 33.3, kind: "wings", actor: "bai", on: true },
+	{ t: 33.35, kind: "glint", actor: "bai" },
+	{ t: 34.3, kind: "pose", actor: "bai", pose: "downSlash", dur: 0.14, ease: "back" },
 	{ t: 34.3, kind: "sfx", name: "bigSlash", volume: 1 },
 	{ t: 34.3, kind: "vfx", name: "wave", at: v(0, 36.5, -33), to: v(0, 48, -150), scale: 1.2, dur: 0.5, color: QI, style: "ink" },
 	{ t: 34.8, kind: "vfx", name: "slash", at: v(-90, 75, -150), to: v(90, 35, -150), dur: 1.2, color: QI, style: "ink" },
+	{ t: 34.82, kind: "vfx", name: "rift", at: v(-90, 75, -150), to: v(90, 35, -150), color: VOIDRIM, life: 2.2 },
 	{ t: 34.8, kind: "impact", strength: 1.6 },
 	{ t: 34.8, kind: "sfx", name: "boom", volume: 0.8 },
 	{ t: 34.8, kind: "vfx", name: "collapse", at: v(0, 40, -60), target: "Army", dur: 2.6 },
 	{ t: 34.85, kind: "vfx", name: "burst", at: v(0, 58, -100), scale: 2, color: GOLD },
-	{ t: 34.85, kind: "hide", actor: "commander" },
+	{ t: 34.85, kind: "knock", actor: "commander", dir: v(0, 0.3, -1), power: 70 },
 	{ t: 34.9, kind: "vfx", name: "burst", at: v(-30, 55, -150), scale: 4, color: GOLD },
 	{ t: 35, kind: "vfx", name: "burst", at: v(10, 48, -165), scale: 4, color: GOLD },
 	{ t: 35.1, kind: "vfx", name: "burst", at: v(40, 42, -150), scale: 4, color: GOLD },
 	{ t: 34.9, kind: "shake", mag: 1.4, dur: 1.2 },
 	{ t: 35.1, kind: "speed", scale: 0.4 },
+	{ t: 35.6, kind: "wings", actor: "bai", on: false },
 	{ t: 36, kind: "speed", scale: 1 },
-	{ t: 36.5, kind: "pose", actor: "bai", pose: "guard", dur: 1.4, ease: "inOut" },
+	{ t: 36.5, kind: "pose", actor: "bai", pose: "hover", dur: 1.4, ease: "inOut" },
 	{ t: 37, kind: "aura", actor: "bai", on: false },
+	{ t: 37, kind: "hide", actor: "commander" },
 
-	// Langit kosong. Sosok diam muncul, dunia jadi dingin
-	{ t: 38, kind: "music", name: "prologSilence", volume: 0.35, fade: 2 },
-	{ t: 40.8, kind: "vfx", name: "burst", at: v(0, 38, -44), scale: 2, color: WHITE },
-	{ t: 40.8, kind: "vfx", name: "ring", at: v(0, 38, -44), normal: v(0, 0, 1), scale: 18, color: WHITE },
-	{ t: 40.8, kind: "sfx", name: "gong", volume: 0.35, pitch: 0.6 },
-	{ t: 40.8, kind: "grade", to: { Saturation: -0.2, TintColor: Color3.fromRGB(232, 238, 255) }, dur: 2 },
+	// Langit kosong, musik hilang. Ruang retak, Sosok Diam keluar dari celahnya, dunia jadi dingin
+	{ t: 38.8, kind: "music", name: "none", fade: 1.2 },
+	{ t: 40.8, kind: "music", name: "prologFigure", volume: 0.32, fade: 1.5 },
 	{ t: 40.8, kind: "prop", name: "eye", to: 0.55, dur: 1.5, ease: "inOut" },
 	{ t: 41, kind: "show", actor: "figure" },
 	{ t: 41, kind: "pose", actor: "figure", pose: "handsBehind", dur: 0 },
+	// Habis pindah shot (41), biar bidang retakan menghadap kamera yang baru
+	{ t: 41.05, kind: "vfx", name: "spaceCrack", at: v(0, 38.8, -44.6), color: VOIDRIM, life: 1.2 },
+	{ t: 41.05, kind: "vfx", name: "burst", at: v(0, 38.5, -44), scale: 2, color: WHITE },
+	{ t: 41.05, kind: "vfx", name: "ring", at: v(0, 38.5, -44), normal: v(0, 0, 1), scale: 18, color: WHITE },
+	{ t: 41.05, kind: "sfx", name: "gong", volume: 0.35, pitch: 0.6 },
+	{ t: 41.05, kind: "grade", to: { Saturation: -0.2, TintColor: Color3.fromRGB(232, 238, 255) }, dur: 2 },
 	{ t: 42.6, kind: "sub", who: "Bai Wuji", text: "...You.", zh: "……是你。", voice: "bai", dur: 2 },
 	{ t: 46.2, kind: "aura", actor: "bai", on: true },
+	{ t: 46.25, kind: "glint", actor: "bai" },
 	{ t: 46.5, kind: "pose", actor: "bai", pose: "thrust", dur: 0.2, ease: "back" },
-	{ t: 46.5, kind: "move", actor: "bai", to: at(0, 35, -35.5, 0, -100), dur: 0.35, ease: "expoOut", ghost: true },
+	{ t: 46.5, kind: "move", actor: "bai", to: THRUST, dur: 0.35, ease: "expoOut", ghost: true },
 	{ t: 46.5, kind: "sfx", name: "whoosh" },
 	{ t: 46.75, kind: "pose", actor: "figure", pose: "twoFinger", dur: 0.15, ease: "out" },
+	{ t: 46.95, kind: "still", actor: "bai", on: true },
 	{ t: 47, kind: "impact", strength: 1.4 },
 	{ t: 47, kind: "sfx", name: "clash", volume: 1 },
-	{ t: 47, kind: "vfx", name: "ring", at: v(0, 38.5, -42.3), normal: v(0, 0, 1), scale: 26, color: WHITE },
+	{ t: 47, kind: "vfx", name: "ring", at: PINCH, normal: v(0, 0, 1), scale: 26, color: WHITE },
+	// Ruang retak di titik benturan lalu pecah kayak kaca, selesai sebelum pindah ke close-up (47.6)
+	{ t: 47, kind: "vfx", name: "spaceCrack", at: PINCH, scale: 0.7, color: VOIDRIM, stages: [0.12], shatter: 0.35 },
 	{ t: 47.05, kind: "speed", scale: 0.12 },
 	{ t: 47.3, kind: "music", name: "none", fade: 0.8 },
 	{ t: 47.6, kind: "speed", scale: 1 },
-	// Waktu seakan berhenti: warna hampir hilang, cuma bunyi retak
+	// Waktu seakan berhenti: warna hampir hilang, ruang di belakang jari retak makin lebar tiap bunyi retak
 	{ t: 47.65, kind: "grade", to: { Saturation: -0.9, Contrast: 0.35 }, dur: 0.25 },
 	{ t: 47.65, kind: "freeze", on: true },
+	{ t: 47.65, kind: "vfx", name: "spaceCrack", at: PINCH_CRACK, scale: 0.36, color: VOIDRIM, stages: [1.85, 3.85], life: 6.35 },
 	{ t: 49.5, kind: "sfx", name: "crack", volume: 0.6 },
-	{ t: 49.5, kind: "vfx", name: "burst", at: v(0, 38.5, -42), scale: 0.3, color: QI },
+	{ t: 49.5, kind: "vfx", name: "burst", at: PINCH, scale: 0.3, color: QI },
 	{ t: 51.5, kind: "sfx", name: "crack", volume: 0.8 },
-	{ t: 51.5, kind: "vfx", name: "burst", at: v(0, 38.5, -42), scale: 0.4, color: QI },
+	{ t: 51.5, kind: "vfx", name: "burst", at: PINCH, scale: 0.4, color: QI },
 	{ t: 52.8, kind: "shake", mag: 0.25, dur: 1.2 },
 
-	// Pedang patah
+	// Pedang pecah berkeping, ruang di sekitarnya ikut pecah kayak kaca. Satu serpihan tetap terjepit di jari
 	{ t: 54, kind: "fade", to: 0.25, dur: 0.05, color: WHITE },
 	{ t: 54.08, kind: "fade", to: 0, dur: 0.7, color: WHITE },
 	{ t: 54, kind: "grade", to: { Saturation: -0.1, Contrast: 0.15, TintColor: Color3.fromRGB(240, 242, 255) }, dur: 0.5 },
+	{ t: 54, kind: "still", actor: "bai", on: false },
 	{ t: 54, kind: "break", actor: "bai" },
+	{ t: 54, kind: "vfx", name: "shard", at: PINCH, color: QI, life: FALL_T0 - 54 },
 	{ t: 54, kind: "freeze", on: false },
 	{ t: 54, kind: "aura", actor: "bai", on: false },
 	{ t: 54, kind: "sfx", name: "shatter", volume: 1 },
 	{ t: 54, kind: "sfx", name: "boom", volume: 0.7, pitch: 0.8 },
 	{ t: 54, kind: "impact", strength: 2 },
 	{ t: 54, kind: "pose", actor: "bai", pose: "fallBack", dur: 0.15, ease: "out" },
-	{ t: 54, kind: "move", actor: "bai", to: at(0, 20, 2, 0, -100), dur: 1.1, ease: "expoOut", ghost: true },
-	{ t: 54.05, kind: "vfx", name: "burst", at: v(0, 38.5, -42), scale: 2, color: QI },
+	{ t: 54, kind: "move", actor: "bai", to: at(0, 20, 2, 0, -100), dur: 1.1, ease: "expoOut", ghost: true, flip: 360 },
+	{ t: 54.02, kind: "vfx", name: "spaceCrack", at: PINCH, scale: 1.4, color: VOIDRIM, shatter: 0.12 },
+	{ t: 54.05, kind: "vfx", name: "burst", at: PINCH, scale: 2, color: QI },
 	{ t: 54.2, kind: "speed", scale: 0.4 },
 	{ t: 54.8, kind: "speed", scale: 1 },
 	{ t: 55.2, kind: "move", actor: "bai", to: at(0, 0, 12, 0, -100), dur: 1.3, ease: "in" },
 	{ t: 56.5, kind: "vfx", name: "debris", at: v(0, 0, 12) },
-	{ t: 56.5, kind: "vfx", name: "cracks", at: v(0, 0, 12), color: QI },
+	{ t: 56.5, kind: "vfx", name: "cracks", at: v(0, 0, 12), scale: 1.3, color: QI },
 	{ t: 56.5, kind: "vfx", name: "ring", at: v(0, 0.3, 12), scale: 30, color: SALT },
 	{ t: 56.5, kind: "shake", mag: 1, dur: 0.6 },
 	{ t: 56.5, kind: "sfx", name: "thud", volume: 0.8 },
-	{ t: 56.6, kind: "pose", actor: "bai", pose: "kneel", dur: 0.5, ease: "out" },
-	{ t: 56.8, kind: "music", name: "prologSilence", volume: 0.4, fade: 3 },
+	{ t: 56.5, kind: "pose", actor: "bai", pose: "landing", dur: 0.1, ease: "out" },
+	{ t: 56.8, kind: "music", name: "prologEnd", volume: 0.45, fade: 2.5, from: 62.2 },
+	{ t: 57.4, kind: "pose", actor: "bai", pose: "kneel", dur: 1.2, ease: "inOut" },
 	{ t: 60.5, kind: "pose", actor: "bai", pose: "kneelLookUp", dur: 1.5, ease: "inOut" },
 	{ t: 63.3, kind: "sub", who: "Bai Wuji", text: "Who... are you?", zh: "你……究竟是谁？", voice: "bai", dur: 2.4 },
 	{ t: 65.4, kind: "vfx", name: "burst", at: v(0, 38, -44), scale: 1.5, color: WHITE },
@@ -557,6 +592,7 @@ const events: CutEvent[] = [
 	{ t: 85.5, kind: "title", text: "DUST THAT DEFIES THE SKY", cn: "逆天之尘", sub: "Prologue  ·  序章", dur: 4.5 },
 	{ t: 85.5, kind: "sfx", name: "gong", volume: 0.6 },
 	{ t: 86, kind: "voice", zh: "序章。逆天之尘。", voice: "narrator" },
+	{ t: 88.6, kind: "music", name: "none", fade: 1.4 },
 ];
 
 export const C01_PROLOG: CutsceneDef = {
@@ -590,6 +626,9 @@ export const C01_PROLOG: CutsceneDef = {
 			look: "template",
 			template: "BaiWuji",
 			color: Color3.fromRGB(235, 235, 240),
+			// Spirit Sword yang udah ada di place (mesh + PBR + rumbai), cadangan pedang part kalau gak ketemu
+			sword: "BaiSword",
+			swordScale: 0.8,
 			weapon: "jian",
 			ghostColor: QI,
 			aura: QI,

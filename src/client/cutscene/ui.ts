@@ -24,6 +24,8 @@ function frame(parent: Instance, props: Partial<WritableInstanceProperties<Frame
 
 function label(parent: Instance, props: Partial<WritableInstanceProperties<TextLabel>>) {
 	const l = new Instance("TextLabel");
+	// Default Roblox "Label" jangan sampai nongol
+	l.Text = "";
 	l.BackgroundTransparency = 1;
 	l.TextColor3 = new Color3(1, 1, 1);
 	l.TextScaled = true;
@@ -34,10 +36,13 @@ function label(parent: Instance, props: Partial<WritableInstanceProperties<TextL
 	return l;
 }
 
-function stroke(parent: GuiObject, thickness = 1.5) {
+function stroke(parent: TextLabel, thickness = 1.5) {
 	const s = new Instance("UIStroke");
 	s.Thickness = thickness;
-	s.Transparency = 0.4;
+	// UIStroke gak ikut TextTransparency: tanpa ini garis tepi teks nyangkut di layar walau teksnya udah hilang
+	const sync = () => (s.Transparency = 0.4 + 0.6 * parent.TextTransparency);
+	sync();
+	parent.GetPropertyChangedSignal("TextTransparency").Connect(sync);
 	s.Parent = parent;
 	return s;
 }

@@ -22,6 +22,7 @@ const CORE_TYPES = [
 	Enum.CoreGuiType.EmotesMenu,
 ];
 const WHITE = new Color3(1, 1, 1);
+const QI = Color3.fromRGB(190, 225, 255);
 /** Maksimal nunggu rig + aset kebuka sebelum mulai (layar hitam). */
 const LOAD_WAIT = 4;
 
@@ -157,7 +158,10 @@ export class CutsceneRun {
 		const t0 = os.clock();
 		const rigs = ReplicatedStorage.WaitForChild("CutsceneRigs", LOAD_WAIT);
 		const needed = new Set<string>();
-		for (const a of this.def.actors) if (a.look === "template" && a.template !== undefined) needed.add(a.template);
+		for (const a of this.def.actors) {
+			if (a.look === "template" && a.template !== undefined) needed.add(a.template);
+			if (a.sword !== undefined) needed.add(a.sword);
+		}
 		while (os.clock() - t0 < LOAD_WAIT) {
 			let missing = false;
 			for (const name of needed) if (!rigs?.FindFirstChild(name)) missing = true;
@@ -202,6 +206,10 @@ export class CutsceneRun {
 			if (!actor) continue;
 			this.actors.set(a.id, actor);
 			for (const e of actor.fx) this.ctx.emitters.push(e);
+			actor.onEmitter = (e) => {
+				e.TimeScale = this.ctx.rate;
+				this.ctx.emitters.push(e);
+			};
 		}
 
 		this.post = new Post(def.look, this.q.dof);
@@ -299,13 +307,13 @@ export class CutsceneRun {
 		return tts.TimeLength;
 	}
 
-	/** Kecilin musik selama ada yang ngomong. */
+	/** Kecilin musik selama ada yang ngomong (biar suara gak tabrakan sama lagu). */
 	private duck(seconds: number) {
 		const m = this.music;
-		if (!m) return;
+		if (!m || m.Parent === undefined) return;
 		this.duckToken += 1;
 		const token = this.duckToken;
-		TweenService.Create(m, new TweenInfo(0.25), { Volume: this.musicVol * 0.45 }).Play();
+		TweenService.Create(m, new TweenInfo(0.25), { Volume: this.musicVol * 0.35 }).Play();
 		task.delay(seconds, () => {
 			if (token === this.duckToken && this.music === m) TweenService.Create(m, new TweenInfo(0.8), { Volume: this.musicVol }).Play();
 		});
@@ -324,9 +332,8 @@ export class CutsceneRun {
 		}
 
 		this.tw.update(now);
-		const breathe = math.sin(now * 1.8);
 		for (const [, actor] of this.actors) {
-			actor.update(now, breathe);
+			actor.update(now);
 			if (actor.ghosting && actor.visible && this.q.ghosts > 0 && actor.liveGhosts < this.q.ghosts && now - actor.lastGhost >= 0.05) {
 				actor.lastGhost = now;
 				vfx.ghost(this.ctx, actor);
@@ -480,8 +487,27 @@ export class CutsceneRun {
 				this.ui.speedLines(e.dur);
 				break;
 			case "move":
-				this.actors.get(e.actor)?.moveTo(this.origin.mul(e.to), e.dur, e.ease, now, e.ghost === true);
+				this.actors.get(e.actor)?.moveTo(this.origin.mul(e.to), e.dur, e.ease, now, e.ghost === true, e.spin ?? 0, e.flip ?? 0);
 				break;
+			case "knock":
+				this.actors.get(e.actor)?.knock(this.origin.VectorToWorldSpace(e.dir), e.power ?? 30, e.fade, now);
+				break;
+			case "wings": {
+				const actor = this.actors.get(e.actor);
+				const on = e.on;
+				if (actor) this.tw.add(on ? 0.3 : 0.6, (k) => actor.setWings(on ? k : 1 - k));
+				break;
+			}
+			case "glint": {
+				const tip = this.actors.get(e.actor)?.bladeTip();
+				if (tip) vfx.glint(this.ctx, tip, QI);
+				break;
+			}
+			case "still": {
+				const actor = this.actors.get(e.actor);
+				if (actor) actor.still = e.on;
+				break;
+			}
 			case "pose":
 				this.actors.get(e.actor)?.setPose(e.pose, e.dur, e.ease, now);
 				break;
@@ -516,11 +542,11 @@ export class CutsceneRun {
 				this.setParticleRate(this.ctx.rate);
 				break;
 			case "break": {
-				const tip = this.actors.get(e.actor)?.breakBlade();
-				if (tip) {
-					const rel = this.origin.PointToObjectSpace(tip);
-					vfx.debris(this.ctx, rel, 0.5, Color3.fromRGB(215, 220, 228), 10);
-					vfx.burst(this.ctx, rel, Color3.fromRGB(190, 225, 255), 1);
+				const blade = this.actors.get(e.actor)?.breakBlade();
+				if (blade) {
+					const [base, tip] = blade;
+					vfx.swordShatter(this.ctx, base, tip, QI);
+					vfx.burst(this.ctx, this.origin.PointToObjectSpace(tip), QI, 1);
 				}
 				break;
 			}
@@ -539,14 +565,23 @@ export class CutsceneRun {
 				const id = MUSIC[e.name] ?? "";
 				const fade = e.fade ?? 1.5;
 				const old = this.music;
-				if (old) {
+				if (old && old.Parent !== undefined) {
 					TweenService.Create(old, new TweenInfo(fade), { Volume: 0 }).Play();
 					task.delay(fade, () => old.Destroy());
 				}
 				this.music = undefined;
 				this.duckToken += 1;
 				if (id !== "") {
-					const s = this.sound(id, 0, true);
+					// Gak di-loop: tiap lagu dipotong pas di bagian yang cocok sama adegan (lihat `from`)
+					const s = this.sound(id, 0, false);
+					const from = e.from ?? 0;
+					if (from > 0) {
+						s.TimePosition = from;
+						if (!s.IsLoaded) {
+							const asked = os.clock();
+							s.Loaded.Once(() => (s.TimePosition = from + (os.clock() - asked)));
+						}
+					}
 					this.musicVol = e.volume ?? 0.5;
 					TweenService.Create(s, new TweenInfo(fade), { Volume: this.musicVol }).Play();
 					this.music = s;
@@ -576,6 +611,15 @@ export class CutsceneRun {
 				break;
 			case "cracks":
 				vfx.cracks(this.ctx, e.at, e.scale ?? 1, e.color);
+				break;
+			case "spaceCrack":
+				vfx.spaceCrack(this.ctx, e.at, e.scale ?? 1, color, e.stages ?? [], e.shatter, e.life ?? 3);
+				break;
+			case "rift":
+				vfx.rift(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.life ?? 1.6);
+				break;
+			case "shard":
+				vfx.shard(this.ctx, e.at, color, e.life ?? 10);
 				break;
 			case "fall":
 				vfx.fall(this.ctx, e.at, e.via ?? e.at.Lerp(e.to ?? e.at, 0.5), e.to ?? e.at, e.dur ?? 3, color);

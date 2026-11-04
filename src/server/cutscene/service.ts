@@ -1,7 +1,7 @@
 // Server cutscene: nyuruh client muter, pasang tameng selama nonton, catat yang udah ditonton,
 // ngizinin tonton ulang. Script Luau lama bisa pakai ServerStorage.PlayCutscene (BindableEvent).
 
-import { Players, ReplicatedStorage, RunService } from "@rbxts/services";
+import { Players, ReplicatedStorage, RunService, ServerStorage } from "@rbxts/services";
 import { ACTIVE_ATTR, getCutscene, REMOTE_NAME, SEEN_ATTR } from "shared/cutscene/registry";
 
 const remote = new Instance("RemoteEvent");
@@ -225,6 +225,36 @@ function buildRig(name: string, spec: RigSpec): Model | undefined {
 	return model;
 }
 
+/**
+ * Pedang mesh buat aktor cutscene, disalin dari senjata yang udah ada di place (ServerStorage.Weapons, gak upload apa-apa).
+ * Script, remote, dan efek bawaan Tool dibuang, sisanya jadi Model polos dengan PrimaryPart = Handle.
+ */
+const SWORDS: Record<string, string> = {
+	BaiSword: "Spirit Sword",
+};
+
+function copyWeapon(name: string, from: string): Model | undefined {
+	const tool = ServerStorage.FindFirstChild("Weapons")?.FindFirstChild(from);
+	if (!tool) {
+		warn(`[Cutscene] Senjata ${from} gak ada di ServerStorage.Weapons, aktor pakai pedang part`);
+		return undefined;
+	}
+	const model = new Instance("Model");
+	model.Name = name;
+	for (const child of tool.GetChildren()) {
+		if (child.IsA("LuaSourceContainer") || child.IsA("RemoteEvent") || child.IsA("RemoteFunction") || child.IsA("BindableEvent")) continue;
+		child.Clone().Parent = model;
+	}
+	for (const d of model.GetDescendants()) if (d.IsA("LuaSourceContainer")) d.Destroy();
+	const handle = model.FindFirstChild("Handle");
+	if (!handle || !handle.IsA("BasePart")) {
+		model.Destroy();
+		return undefined;
+	}
+	model.PrimaryPart = handle;
+	return model;
+}
+
 /** Rig cutscene: Mannequin polos (cadangan) + tokoh dari katalog. Dipanggil sekali pas server nyala. */
 export function ensureRigs() {
 	let folder = ReplicatedStorage.FindFirstChild("CutsceneRigs");
@@ -237,6 +267,11 @@ export function ensureRigs() {
 		const grey = Color3.fromRGB(190, 190, 195);
 		const mannequin = buildRig("Mannequin", { skin: grey });
 		if (mannequin) mannequin.Parent = folder;
+	}
+	for (const [name, from] of pairs(SWORDS)) {
+		if (folder.FindFirstChild(name)) continue;
+		const sword = copyWeapon(name, from);
+		if (sword) sword.Parent = folder;
 	}
 	// Urutan tetap: tokoh utama duluan biar siap paling cepat
 	for (const name of ["BaiWuji", "Figure", "Commander", "HeavenSoldier"]) {

@@ -45,6 +45,10 @@ export interface ActorDef {
 	color?: Color3;
 	material?: Enum.Material;
 	weapon?: "jian" | "spear";
+	/** Pedang mesh dari ReplicatedStorage.CutsceneRigs (disalin server dari ServerStorage.Weapons). Kalau gak ada, pakai `weapon`. */
+	sword?: string;
+	/** Skala pedang mesh (1 = ukuran asli di ServerStorage). */
+	swordScale?: number;
 	/** Warna bayangan (afterimage) waktu gerak cepat. */
 	ghostColor?: Color3;
 	/** Garis cahaya di pinggir badan (Highlight). Grafik tinggi semua, grafik sedang cuma yang `key`. */
@@ -82,7 +86,16 @@ export type CutEvent = At &
 		/** Kecepatan timeline (slow-mo). 1 = normal. */
 		| { kind: "speed"; scale: number }
 		| { kind: "lines"; dur: number }
-		| { kind: "move"; actor: string; to: CFrame; dur: number; ease?: Ease; ghost?: boolean }
+		/** Pindah. `spin` = muter di tempat (derajat, sumbu tegak), `flip` = salto (derajat, sumbu kanan badan), ikut easing. */
+		| { kind: "move"; actor: string; to: CFrame; dur: number; ease?: Ease; ghost?: boolean; spin?: number; flip?: number }
+		/** Terhempas: melayang balistik + berputar, terus luruh jadi debu cahaya selama `fade` detik (kalau diisi). */
+		| { kind: "knock"; actor: string; dir: Vector3; power?: number; fade?: number }
+		/** Sayap cahaya di pangkal pedang mesh (LightWings) mekar / redup. */
+		| { kind: "wings"; actor: string; on: boolean }
+		/** Kilau bintang di ujung pedang. */
+		| { kind: "glint"; actor: string }
+		/** Diam total (gak napas, gak goyang, gak mantul). Buat Sosok Diam dan momen waktu berhenti. */
+		| { kind: "still"; actor: string; on: boolean }
 		| { kind: "pose"; actor: string; pose: string; dur: number; ease?: Ease }
 		| { kind: "anim"; actor: string; animId: string; speed?: number }
 		| { kind: "show"; actor: string }
@@ -90,7 +103,19 @@ export type CutEvent = At &
 		| { kind: "break"; actor: string }
 		| {
 				kind: "vfx";
-				name: "slash" | "burst" | "ring" | "fall" | "debris" | "collapse" | "wave" | "lightning" | "cracks";
+				name:
+					| "slash"
+					| "burst"
+					| "ring"
+					| "fall"
+					| "debris"
+					| "collapse"
+					| "wave"
+					| "lightning"
+					| "cracks"
+					| "spaceCrack"
+					| "rift"
+					| "shard";
 				at: Vector3;
 				to?: Vector3;
 				/** Titik kontrol kurva buat fall (Bezier). */
@@ -104,9 +129,16 @@ export type CutEvent = At &
 				color?: Color3;
 				/** "ink" = lapisan tinta hitam + cipratan tinta (ciri khas pedang Bai Wuji). */
 				style?: "ink";
+				/** spaceCrack: detik (sejak muncul) retakan melebar satu tahap lagi. */
+				stages?: number[];
+				/** spaceCrack: detik (sejak muncul) ruangnya pecah kayak kaca. */
+				shatter?: number;
+				/** spaceCrack / rift / shard: berapa lama bertahan sebelum menutup / hilang. */
+				life?: number;
 		  }
 		| { kind: "sfx"; name: string; volume?: number; pitch?: number; loop?: boolean }
-		| { kind: "music"; name: string; volume?: number; fade?: number }
+		/** Musik. `from` = mulai dari detik ke berapa di lagunya (biar bagian klimaks pas sama adegan). */
+		| { kind: "music"; name: string; volume?: number; fade?: number; from?: number }
 	);
 
 export interface CutsceneLook {

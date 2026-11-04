@@ -3,11 +3,17 @@
 // Belum didengerin satu-satu: kalau ada yang gak cocok, ganti id-nya di sini aja. Id kosong = dilewati.
 
 export const MUSIC: Record<string, string> = {
-	// "Large Scale Maneuvers - Remastered" (APM): drum militer megah, 97 dtk.
-	// Cadangan: 9046506025 Imminent Closure, 9043656661 Star Chasing (orkestra heroik + paduan suara)
-	prologWar: "rbxassetid://9040111018",
-	// "Moon Over Hangzhou" (DistroKid). Cadangan: 1839740586 Last Dynasty, 1838199820 Silent Valley
-	prologSilence: "rbxassetid://132534994710064",
+	// Semua dari album "Cezame China" (library musik film profesional, instrumen China asli), gratis di Creator Store.
+	// Dicek 4 Nov: gak ada vokal (dites pakai AudioSpeechToText Roblox), bagian keras/pelan diukur pakai AudioAnalyzer.
+	// "Yin Yang (Alternate No Choirs)": taiko, guzheng, seruling, tegang lalu perang. Dipotong dari detik 22.8
+	// biar jeda hening di lagunya jatuh pas Bai Wuji ngangkat pedang di udara, dan klimaksnya pas tebasan raksasa.
+	// Cadangan: 9046445896 Mystical Oracle, 9047430650 An Unexpected Revelation, 9046446330 Heart of Dragon
+	prologWar: "rbxassetid://9046446608",
+	// "Mystical Oracle (Alternate No Percs)": seruling dizi misterius, pas sosok diam muncul
+	prologFigure: "rbxassetid://9046447265",
+	// "An Unexpected Revelation": dari detik 62.2 bagian harpa yang sendu (berlutut, langit menutup mata),
+	// lalu final heroik pas serpihan menembus awan ke dunia fana
+	prologEnd: "rbxassetid://9047430650",
 	sorrow: "",
 };
 
