@@ -6,7 +6,8 @@ local relay = RS:WaitForChild("SwordComboRelay")
 
 relay.OnClientEvent:Connect(function(char, tool, step)
 	if typeof(char) ~= "Instance" or typeof(tool) ~= "Instance" or not char.Parent then return end
-	local clip = SwordCombo.Get(step)
+	local style = SwordCombo.StyleOf(tool)
+	local clip = SwordCombo.Get(step, style)
 	if not clip then return end
 	-- far away (or on a phone in a crowded fight): don't spend frames animating a character you can barely see
 	local root = char:FindFirstChild("HumanoidRootPart")
@@ -28,5 +29,5 @@ relay.OnClientEvent:Connect(function(char, tool, step)
 		onEnd = function(chained)
 			if not chained then char:SetAttribute("SwordAttacking", false) end
 		end,
-	})
+	}, style)
 end)

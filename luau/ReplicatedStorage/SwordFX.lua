@@ -16,9 +16,9 @@ local SwordFX = {}
 -- On top of that a rolling budget caps how many effect parts this client may create per 0.25 s, whatever happens.
 local FAR, MID = 140, 70
 SwordFX.BUDGET = {
-	[1] = { steps = 1, ghostEvery = 0, shards = 0.3, streaks = 0.5, ring = 10, bolts = 0.4, flip = 0.5, hz = 30, burst = 60 },
-	[2] = { steps = 3, ghostEvery = 6, shards = 0.6, streaks = 0.75, ring = 18, bolts = 0.7, flip = 0.8, hz = 45, burst = 150 },
-	[3] = { steps = 6, ghostEvery = 3, shards = 1, streaks = 1, ring = 28, bolts = 1, flip = 1, hz = 60, burst = 320 },
+	[1] = { steps = 1, ghostEvery = 0, shards = 0.3, streaks = 0.5, ring = 10, bolts = 0.4, flip = 0.5, hz = 30, burst = 60, particles = 0.45 },
+	[2] = { steps = 3, ghostEvery = 6, shards = 0.6, streaks = 0.75, ring = 18, bolts = 0.7, flip = 0.8, hz = 45, burst = 150, particles = 0.7 },
+	[3] = { steps = 6, ghostEvery = 3, shards = 1, streaks = 1, ring = 28, bolts = 1, flip = 1, hz = 60, burst = 320, particles = 1 },
 }
 local tierCache, tierAt = 3, -math.huge
 local function deviceTier()
@@ -92,6 +92,26 @@ local function bare(p)
 	return p
 end
 
+-- ---------------------------------------------------------------- element signatures (particles)
+-- Self-made textures (assets/VFX/textures_v1), uploaded with will's OK on 2026-11-01; same ids as WeaponSkillClient.
+local VTX = {
+	lightning = "rbxassetid://85766794891773", glow = "rbxassetid://86794260657796", flare = "rbxassetid://74917717176224",
+	shock = "rbxassetid://120638941464407", smoke = "rbxassetid://128189018436398", frost = "rbxassetid://106494765248742",
+	snow = "rbxassetid://132476517971091", petal = "rbxassetid://115963999420447", lotus = "rbxassetid://125562162597738",
+	aura = "rbxassetid://103751465846390", crescent = "rbxassetid://116325702137675", swirl = "rbxassetid://74831198929905",
+	fire = "rbxasset://textures/particles/fire_main.dds", spark = "rbxasset://textures/particles/sparkles_main.dds",
+}
+local G4 = Enum.ParticleFlipbookLayout.Grid4x4
+local FLAT = Enum.ParticleOrientation.VelocityPerpendicular -- with a tiny upward speed: lies flat on the ground
+local function NSK(t)
+	local ks = {}
+	for _, p in ipairs(t) do table.insert(ks, NumberSequenceKeypoint.new(p[1], p[2])) end
+	return NumberSequence.new(ks)
+end
+local FADE = NSK({ { 0, 0 }, { 0.7, 0.35 }, { 1, 1 } })
+local function NR(a, b) return NumberRange.new(a, b or a) end
+local function CS(a, b) return ColorSequence.new(a, b or a) end
+
 local function folderFx()
 	local f = Instance.new("Folder")
 	f.Name = "SwordFX"
@@ -99,6 +119,106 @@ local function folderFx()
 	Debris:AddItem(f, 3 * slow())
 	return f
 end
+
+-- GPU particle burst from a hidden host part. One part per burst, whatever the particle count, so this is the
+-- cheap way to make an effect thick (the old look used one part per streak/shard).
+local function burst(f, cf, n, props)
+	if n <= 0 then return end
+	local host = bare(Instance.new("Part"))
+	host.Transparency, host.Size, host.CFrame = 1, Vector3.new(0.2, 0.2, 0.2), cf
+	host.Parent = f
+	local e = Instance.new("ParticleEmitter")
+	e.Enabled = false
+	e.LightInfluence = 0
+	e.Speed = NR(0)
+	e.Transparency = FADE
+	for k, v in pairs(props) do e[k] = v end
+	e.Parent = host
+	e:Emit(n)
+end
+
+local function groundBelow(pos, ignore)
+	local ray = RaycastParams.new()
+	ray.FilterType = Enum.RaycastFilterType.Exclude
+	ray.FilterDescendantsInstances = ignore
+	local hit = workspace:Raycast(pos + Vector3.new(0, 1, 0), Vector3.new(0, -9, 0), ray)
+	return hit and hit.Position + Vector3.new(0, 0.12, 0)
+end
+
+-- impact signature per element. pos = impact point, k = particle tier factor
+local SIG = {}
+SIG.Thunder = function(f, pos, pal, heavy, k)
+	burst(f, CFrame.new(pos), math.max(2, math.floor((heavy and 8 or 5) * k)), { Texture = VTX.lightning, FlipbookLayout = G4,
+		FlipbookMode = Enum.ParticleFlipbookMode.Random, Color = CS(pal.core, pal.main), LightEmission = 1, Brightness = 3,
+		Size = NumberSequence.new(heavy and 6 or 4), Lifetime = NR(0.1, 0.2), Rotation = NR(0, 360), Speed = NR(2, 6), SpreadAngle = Vector2.new(180, 180) })
+	burst(f, CFrame.new(pos), 1, { Texture = VTX.shock, Color = CS(pal.main), LightEmission = 1, Brightness = 2,
+		Size = NSK({ { 0, 0.5 }, { 1, heavy and 12 or 8 } }), Transparency = NSK({ { 0, 0.05 }, { 1, 1 } }), Lifetime = NR(0.22) })
+	burst(f, CFrame.new(pos), 1, { Texture = VTX.flare, Color = CS(pal.core), LightEmission = 1, Brightness = 4,
+		Size = NSK({ { 0, heavy and 9 or 6 }, { 1, 0 } }), Lifetime = NR(0.16) })
+end
+SIG.Ice = function(f, pos, pal, heavy, k, ground)
+	burst(f, CFrame.new(pos), math.max(3, math.floor((heavy and 18 or 10) * k)), { Texture = VTX.snow, Color = CS(pal.core, pal.main),
+		LightEmission = 0.8, Size = NSK({ { 0, 0.55 }, { 1, 0.15 } }), Speed = NR(6, 14), SpreadAngle = Vector2.new(180, 180),
+		Drag = 3, Acceleration = Vector3.new(0, -6, 0), Rotation = NR(0, 360), RotSpeed = NR(-220, 220), Lifetime = NR(0.5, 0.9) })
+	burst(f, CFrame.new(pos), 1, { Texture = VTX.crescent, Color = CS(pal.core, pal.main), LightEmission = 1, Brightness = 2,
+		Size = NSK({ { 0, heavy and 7 or 5 }, { 1, heavy and 10 or 7 } }), Rotation = NR(math.random(0, 360)), Lifetime = NR(0.2) })
+	if ground then
+		burst(f, CFrame.new(ground), 1, { Texture = VTX.frost, Color = CS(pal.core, pal.main), LightEmission = 0.6, Orientation = FLAT,
+			Speed = NR(0.01), Size = NSK({ { 0, 1 }, { 0.25, heavy and 11 or 7 }, { 1, heavy and 12 or 8 } }),
+			Transparency = NSK({ { 0, 0.15 }, { 0.6, 0.35 }, { 1, 1 } }), Rotation = NR(0, 360), Lifetime = NR(0.7) })
+	end
+end
+SIG.Lotus = function(f, pos, pal, heavy, k)
+	burst(f, CFrame.new(pos), math.max(4, math.floor((heavy and 20 or 11) * k)), { Texture = VTX.petal,
+		Color = CS(Color3.fromRGB(255, 236, 246), pal.main), LightEmission = 0.35, Size = NSK({ { 0, 0.7 }, { 1, 0.35 } }),
+		Speed = NR(5, 12), SpreadAngle = Vector2.new(180, 180), Drag = 2.5, Acceleration = Vector3.new(0, -2, 0),
+		Rotation = NR(0, 360), RotSpeed = NR(-180, 180), Lifetime = NR(0.8, 1.4) })
+	burst(f, CFrame.new(pos), 1, { Texture = VTX.lotus, Color = CS(Color3.new(1, 1, 1)), LightEmission = 0.4,
+		Size = NSK({ { 0, 0.5 }, { 0.35, heavy and 7 or 5 }, { 1, heavy and 8 or 5.5 } }),
+		Transparency = NSK({ { 0, 0.1 }, { 0.6, 0.2 }, { 1, 1 } }), RotSpeed = NR(40), Lifetime = NR(0.45) })
+end
+SIG.Jade = function(f, pos, pal, heavy, k)
+	burst(f, CFrame.new(pos), 1, { Texture = VTX.swirl, Color = CS(pal.core, pal.main), LightEmission = 1, Brightness = 2,
+		Size = NSK({ { 0, 1 }, { 1, heavy and 11 or 7 } }), RotSpeed = NR(-320), Lifetime = NR(0.35) })
+	burst(f, CFrame.new(pos), 1, { Texture = VTX.shock, Color = CS(pal.main), LightEmission = 1,
+		Size = NSK({ { 0, 0.5 }, { 1, heavy and 13 or 8 } }), Transparency = NSK({ { 0, 0.05 }, { 1, 1 } }), Lifetime = NR(0.25) })
+	burst(f, CFrame.new(pos), math.max(3, math.floor((heavy and 16 or 9) * k)), { Texture = VTX.glow, Color = CS(pal.core, pal.main),
+		LightEmission = 1, Size = NSK({ { 0, 0.8 }, { 1, 0 } }), Speed = NR(5, 12), SpreadAngle = Vector2.new(180, 180), Drag = 2,
+		Lifetime = NR(0.3, 0.6) })
+end
+SIG.Fire = function(f, pos, pal, heavy, k, ground)
+	burst(f, CFrame.new(pos), math.max(2, math.floor((heavy and 9 or 5) * k)), { Texture = VTX.aura, FlipbookLayout = G4,
+		FlipbookMode = Enum.ParticleFlipbookMode.OneShot, Color = CS(Color3.fromRGB(255, 225, 130), Color3.fromRGB(255, 70, 20)),
+		LightEmission = 1, Brightness = 2, Size = NSK({ { 0, heavy and 4 or 3 }, { 1, heavy and 7 or 5 } }), Speed = NR(2, 6),
+		SpreadAngle = Vector2.new(70, 70), Acceleration = Vector3.new(0, 6, 0), Rotation = NR(-25, 25), Lifetime = NR(0.35, 0.5) })
+	burst(f, CFrame.new(pos), math.max(4, math.floor((heavy and 20 or 11) * k)), { Texture = VTX.fire,
+		Color = CS(Color3.fromRGB(255, 200, 90), Color3.fromRGB(255, 60, 10)), LightEmission = 1, Size = NSK({ { 0, 0.4 }, { 1, 0 } }),
+		Speed = NR(8, 16), SpreadAngle = Vector2.new(180, 180), Acceleration = Vector3.new(0, 10, 0), Drag = 2, Lifetime = NR(0.4, 0.8) })
+	if k >= 0.7 then
+		burst(f, CFrame.new(ground or pos), heavy and 3 or 2, { Texture = VTX.smoke, FlipbookLayout = G4,
+			FlipbookMode = Enum.ParticleFlipbookMode.OneShot, Color = CS(Color3.fromRGB(60, 50, 45)), LightEmission = 0,
+			Size = NSK({ { 0, 2.5 }, { 1, 5.5 } }), Transparency = NSK({ { 0, 0.45 }, { 1, 1 } }), Speed = NR(1, 2.5),
+			SpreadAngle = Vector2.new(60, 60), Acceleration = Vector3.new(0, 2, 0), Lifetime = NR(0.6, 0.8) })
+	end
+end
+SIG.None = function(f, pos, pal, heavy, k)
+	burst(f, CFrame.new(pos), 1, { Texture = VTX.flare, Color = CS(pal.core), LightEmission = 1, Brightness = 3,
+		Size = NSK({ { 0, heavy and 7 or 5 }, { 1, 0 } }), Lifetime = NR(0.16) })
+end
+
+-- particles that stream off the blade tip while it swings (rate per second at full quality)
+local TIP = {
+	Thunder = { Texture = VTX.lightning, FlipbookLayout = G4, FlipbookMode = Enum.ParticleFlipbookMode.Random, LightEmission = 1,
+		Brightness = 2, Size = NumberSequence.new(1.3), Lifetime = NR(0.08, 0.14), Rotation = NR(0, 360), Rate = 28 },
+	Ice = { Texture = VTX.snow, LightEmission = 0.8, Size = NSK({ { 0, 0.4 }, { 1, 0.1 } }), Lifetime = NR(0.4, 0.7), Speed = NR(0.5, 2),
+		SpreadAngle = Vector2.new(180, 180), Acceleration = Vector3.new(0, -4, 0), Rotation = NR(0, 360), RotSpeed = NR(-200, 200), Rate = 30 },
+	Lotus = { Texture = VTX.petal, LightEmission = 0.35, Size = NSK({ { 0, 0.5 }, { 1, 0.3 } }), Lifetime = NR(0.6, 1), Speed = NR(0.5, 2),
+		SpreadAngle = Vector2.new(180, 180), Drag = 1, Acceleration = Vector3.new(0, -1.5, 0), Rotation = NR(0, 360), RotSpeed = NR(-160, 160), Rate = 22 },
+	Jade = { Texture = VTX.glow, LightEmission = 1, Size = NSK({ { 0, 0.6 }, { 1, 0 } }), Lifetime = NR(0.25, 0.4), Rate = 35 },
+	Fire = { Texture = VTX.fire, LightEmission = 1, Size = NSK({ { 0, 0.9 }, { 1, 0.2 } }), Lifetime = NR(0.25, 0.45), Speed = NR(1, 3),
+		SpreadAngle = Vector2.new(180, 180), Acceleration = Vector3.new(0, 8, 0), Rate = 45 },
+	None = { Texture = VTX.spark, LightEmission = 1, Size = NumberSequence.new(0.4), Lifetime = NR(0.2, 0.3), Rate = 20 },
+}
 
 -- crescent slash meshes from the pack, rolled into the swing plane, two layers (white core + element colour)
 local function crescent(f, root, pal, roll, scale, dur)
@@ -360,6 +480,22 @@ local function sweep(char, tool, pal, heavy, element, tier)
 	for _, d in ipairs(tool:GetDescendants()) do
 		if d:IsA("MeshPart") and d.Transparency < 0.5 and d.Size.Magnitude > 1 then table.insert(ghostParts, d) end
 	end
+	-- element particles streaming off the tip while the blade moves (one emitter, rate scaled by the quality tier)
+	local tipAtt = Instance.new("Attachment")
+	tipAtt.Name = "SwordFXTip"
+	tipAtt.Position = axis * half * 0.92
+	tipAtt.Parent = part
+	local tipEm = Instance.new("ParticleEmitter")
+	tipEm.LightInfluence = 0
+	tipEm.Speed = NR(0)
+	tipEm.Transparency = FADE
+	local tipStyle = TIP[element or "None"] or TIP.None
+	for k, v in pairs(tipStyle) do tipEm[k] = v end
+	tipEm.Rate = tipStyle.Rate * B.particles
+	tipEm.Color = CS(pal.core, pal.main)
+	if element == "Fire" then tipEm.Color = CS(Color3.fromRGB(255, 200, 90), Color3.fromRGB(255, 60, 10)) end
+	if element == "Lotus" then tipEm.Color = CS(Color3.fromRGB(255, 236, 246), pal.main) end
+	tipEm.Parent = tipAtt
 	local conn
 	sweeping[tool] = true
 	conn = RunService.RenderStepped:Connect(function()
@@ -368,6 +504,8 @@ local function sweep(char, tool, pal, heavy, element, tier)
 		if not part.Parent or not char.Parent or (os.clock() - started > 0.05 and not on) or os.clock() - started > 1.2 then
 			conn:Disconnect()
 			sweeping[tool] = nil
+			tipEm.Enabled = false
+			Debris:AddItem(tipAtt, 1.5)
 			return
 		end
 		-- lay sheets at most B.hz times a second (a 144 Hz screen must not make 2.4x more parts than a 60 Hz one)
@@ -486,9 +624,24 @@ function SwordFX.Spawn(char, tool, clip, phase)
 		flipbooks(f, CFrame.lookAt(pos, pos + cf.LookVector) * CFrame.Angles(0, 0, math.rad(fx.roll or 0)), pal,
 			(heavy and 2 or 1.3) * B.flip, heavy and tier >= 2)
 		if allow(nShard, tier) then shards(f, pos, cf.LookVector, pal, nShard, heavy and 46 or 32) end
-		if el == "Thunder" then
+		if el == "Thunder" and tier >= 3 then
 			local nb = scaled(heavy and 6 or 3, B.bolts)
 			if allow(nb * 5, tier) then bolts(f, pos, pal, nb) end
+		end
+		-- element signature (particles: thick but cheap) + ground marks for spins and slams
+		local ground = groundBelow(pos, { char, f })
+		if allow(3, tier) then (SIG[el or "None"] or SIG.None)(f, pos, pal, heavy, B.particles, ground) end
+		local groundRoot = (fx.spin or fx.slam) and groundBelow(root.Position, { char, f })
+		if groundRoot and allow(2, tier) then
+			burst(f, CFrame.new(groundRoot), 1, { Texture = VTX.shock, Color = CS(pal.core, pal.main), LightEmission = 1, Orientation = FLAT,
+				Speed = NR(0.01), Size = NSK({ { 0, 1 }, { 1, fx.spin and 16 or 13 } }), Transparency = NSK({ { 0, 0.05 }, { 1, 1 } }),
+				Lifetime = NR(fx.spin and 0.35 or 0.3) })
+			if fx.slam then
+				burst(f, CFrame.new(groundRoot + root.CFrame.LookVector * 4), scaled(5, B.particles), { Texture = VTX.smoke,
+					FlipbookLayout = G4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot, Color = CS(Color3.fromRGB(120, 110, 100)),
+					LightEmission = 0, Size = NSK({ { 0, 2 }, { 1, 5 } }), Transparency = NSK({ { 0, 0.4 }, { 1, 1 } }), Speed = NR(5, 9),
+					SpreadAngle = Vector2.new(80, 80), Drag = 3, Lifetime = NR(0.5, 0.7) })
+			end
 		end
 		if heavy and allow(B.ring, tier) then
 			groundRing(f, root, pal, 22, B.ring)
