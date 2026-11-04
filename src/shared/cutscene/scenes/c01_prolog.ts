@@ -377,7 +377,7 @@ const events: CutEvent[] = [
 	{ t: 0.2, kind: "fade", to: 0, dur: 3 },
 	// Orkestra China tanpa vokal, dipotong dari detik 22.8 biar klimaksnya jatuh pas tebasan raksasa
 	{ t: 0, kind: "music", name: "prologWar", volume: 0.55, fade: 3, from: 22.8 },
-	{ t: 0, kind: "sfx", name: "wind", volume: 0.25, loop: true },
+	{ t: 0, kind: "sfx", name: "wind", volume: 0.16, loop: true },
 	...each(soldiers, (id) => ({ t: 0, kind: "pose", actor: id, pose: "attention", dur: 0 })),
 	// Sosok Diam gak pernah napas atau goyang sedikit pun
 	{ t: 0, kind: "still", actor: "figure", on: true },
@@ -534,7 +534,8 @@ const events: CutEvent[] = [
 	{ t: 47.05, kind: "speed", scale: 0.12 },
 	{ t: 47.3, kind: "music", name: "none", fade: 0.8 },
 	{ t: 47.6, kind: "speed", scale: 1 },
-	// Waktu seakan berhenti: warna hampir hilang, ruang di belakang jari retak makin lebar tiap bunyi retak
+	// Waktu seakan berhenti: warna hampir hilang, angin ikut hening, ruang di belakang jari retak makin lebar tiap bunyi retak
+	{ t: 47.6, kind: "sfx", name: "wind", volume: 0, fade: 0.6 },
 	{ t: 47.65, kind: "grade", to: { Saturation: -0.9, Contrast: 0.35 }, dur: 0.25 },
 	{ t: 47.65, kind: "freeze", on: true },
 	{ t: 47.65, kind: "vfx", name: "spaceCrack", at: PINCH_CRACK, scale: 0.36, color: VOIDRIM, stages: [1.85, 3.85], life: 6.35 },
@@ -554,6 +555,7 @@ const events: CutEvent[] = [
 	{ t: 54, kind: "freeze", on: false },
 	{ t: 54, kind: "aura", actor: "bai", on: false },
 	{ t: 54, kind: "sfx", name: "shatter", volume: 1 },
+	{ t: 54.3, kind: "sfx", name: "wind", volume: 0.16, fade: 2 },
 	{ t: 54, kind: "sfx", name: "boom", volume: 0.7, pitch: 0.8 },
 	{ t: 54, kind: "impact", strength: 2 },
 	{ t: 54, kind: "pose", actor: "bai", pose: "fallBack", dur: 0.15, ease: "out" },

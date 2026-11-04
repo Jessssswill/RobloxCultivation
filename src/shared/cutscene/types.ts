@@ -136,7 +136,8 @@ export type CutEvent = At &
 				/** spaceCrack / rift / shard: berapa lama bertahan sebelum menutup / hilang. */
 				life?: number;
 		  }
-		| { kind: "sfx"; name: string; volume?: number; pitch?: number; loop?: boolean }
+		/** SFX. Kalau loop dengan nama ini lagi jalan, event ini cuma ngubah volumenya pelan-pelan (`fade` detik), misal angin hening pas waktu berhenti. */
+	| { kind: "sfx"; name: string; volume?: number; pitch?: number; loop?: boolean; fade?: number }
 		/** Musik. `from` = mulai dari detik ke berapa di lagunya (biar bagian klimaks pas sama adegan). */
 		| { kind: "music"; name: string; volume?: number; fade?: number; from?: number }
 	);

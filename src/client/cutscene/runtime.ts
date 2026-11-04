@@ -94,6 +94,8 @@ export class CutsceneRun {
 	private musicVol = 0.5;
 	private duckToken = 0;
 	private sounds = new Array<Sound>();
+	/** SFX loop yang lagi jalan, per nama (biar volumenya bisa diatur event berikutnya). */
+	private loops = new Map<string, Sound>();
 	private voiceFolder?: Folder;
 	private voiceLines = new Map<CutEvent, AudioTextToSpeech>();
 	private hiddenGuis = new Array<ScreenGui>();
@@ -554,10 +556,16 @@ export class CutsceneRun {
 				this.fireVfx(e);
 				break;
 			case "sfx": {
+				const running = this.loops.get(e.name);
+				if (running && running.Parent !== undefined) {
+					TweenService.Create(running, new TweenInfo(e.fade ?? 0.5), { Volume: e.volume ?? 0.8 }).Play();
+					break;
+				}
 				const id = SFX[e.name] ?? "";
 				if (id !== "") {
 					const s = this.sound(id, e.volume ?? 0.8, e.loop === true);
 					if (e.pitch !== undefined) s.PlaybackSpeed = e.pitch;
+					if (e.loop === true) this.loops.set(e.name, s);
 				}
 				break;
 			}
@@ -658,6 +666,7 @@ export class CutsceneRun {
 		this.post?.destroy();
 		for (const s of this.sounds) s.Destroy();
 		this.sounds.clear();
+		this.loops.clear();
 		this.voiceFolder?.Destroy();
 		this.voiceLines.clear();
 

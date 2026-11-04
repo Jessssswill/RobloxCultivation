@@ -1,6 +1,7 @@
 // Suara cutscene: musik, SFX, profil suara Mandarin (TTS), tekstur VFX.
 // Musik + SFX diambil gratis dari Creator Store (4 Nov 2026), semua udah dicek bisa ke-load di Studio.
-// Belum didengerin satu-satu: kalau ada yang gak cocok, ganti id-nya di sini aja. Id kosong = dilewati.
+// SFX dicek panjangnya (semua 1-10 dtk, jadi bukan lagu). Kalau ada yang gak cocok, ganti id-nya di sini aja. Id kosong = dilewati.
+// Hati-hati: hasil cari "sound effect" kadang isinya lagu (upload DistroKid / label musik). Cek panjangnya dulu.
 
 export const MUSIC: Record<string, string> = {
 	// Semua dari album "Cezame China" (library musik film profesional, instrumen China asli), gratis di Creator Store.
@@ -26,7 +27,8 @@ export const SFX: Record<string, string> = {
 	clash: "rbxassetid://9119072674", // denting pedang logam (Pro Sound Effects)
 	crack: "rbxassetid://9114858583", // retakan es besar (Pro Sound Effects)
 	shatter: "rbxassetid://132349765576039", // pecah kaca keras
-	wind: "rbxassetid://112385924701681", // angin dingin menderu (loop)
+	// Angin menderu (loop 10 dtk). Id lama 112385924701681 "Cold Wind Howling" ternyata lagu DistroKid 4:51, bukan angin
+	wind: "rbxassetid://6544555787",
 	whoosh: "rbxassetid://9126229255", // whoosh cepat (Pro Sound Effects)
 	thud: "rbxassetid://98059896877360", // hantaman jatuh
 	thunder: "rbxassetid://9126099928", // petir besar (Pro Sound Effects)
