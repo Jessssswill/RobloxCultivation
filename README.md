@@ -48,3 +48,17 @@ Butuh Node.js (LTS) dan Rojo 7.7.1 (udah ada di `C:\Users\Shen\Project\ROBLOX\Ro
 | `npm run watch` | Compile otomatis tiap file disimpan |
 | `rojo serve` | Nyambungin project ke Studio |
 | `rojo build -o test.rbxlx` | Bikin place percobaan dari project (buat ngecek struktur) |
+
+## Sistem cutscene (4 Nov 2026)
+
+Cutscene sinematik ala donghua, semua bisa di-skip (tahan Space / Enter / tombol B / tahan tombol di layar). Kode di `src/shared/cutscene`, `src/client/cutscene`, `src/server/cutscene`.
+
+- **Satu cutscene = satu file data** di `src/shared/cutscene/scenes/`, didaftarin di `registry.ts`. Isinya kunci kamera (spline halus, bisa ngikutin aktor), aktor, dan daftar event (subtitle, kartu nama, pose, gerak, VFX, impact, slow-mo, suara).
+- **Animasi tanpa upload:** aktor itu salinan rig R15, digerakin lewat C0 Motor6D dari pose di `poses.ts`. Kalau nanti animasi asli udah di-upload (izin will), pakai event `anim`.
+- **Rasa donghua:** impact frame (hitam-putih sekejap) + hitstop + garis kecepatan, slow-mo, afterimage waktu gerak cepat, kartu nama tokoh, DOF, grading warna, guncangan kamera.
+- **Ringan di HP:** `quality.ts` otomatis pindah ke mode ringan di HP atau grafik rendah: tanpa DOF, partikel 40%, afterimage maks 3, set lebih sedikit part dan lampu, awan gak transparan.
+- **Server:** pemain dapat ForceField tak terlihat + atribut karakter `InCutscene` selama nonton. Yang udah ditonton dicatat di atribut pemain `SeenCutscenes` (nanti ikut DataStore). Tonton ulang lewat `requestReplay(id)` di client, cuma buat yang udah pernah ditonton.
+- **Dari Luau:** `game.ServerStorage.PlayCutscene:Fire(player, "c01_prolog")`, dan `game.ServerStorage.CutsceneFinished.Event` buat lanjut cerita.
+- **Tes di Studio (Play):** ketik `!cs 1` di chat, atau di command bar server `workspace:SetAttribute("TestCutscene", "c01_prolog")`.
+- **Suara:** id musik/SFX di `audio.ts` masih kosong (cutscene tetap jalan tanpa suara). Tekstur VFX pakai yang udah di-upload 1 Nov.
+- **Posisi:** cutscene Prolog dibangun lokal di langit (0, 1200, -4000). Bisa dipindah dengan naruh part bernama `Prolog` di folder `Workspace.CutsceneAnchors`.
