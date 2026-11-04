@@ -4,6 +4,16 @@
 
 export type Ease = "linear" | "in" | "out" | "inOut" | "back" | "expoOut";
 
+/** Tingkat grafik: 0 ringan, 1 sedang, 2 tinggi. Ikut setting grafik pemain (lihat client/cutscene/quality.ts). */
+export type Tier = 0 | 1 | 2;
+
+export interface GradeProps {
+	Brightness: number;
+	Contrast: number;
+	Saturation: number;
+	TintColor: Color3;
+}
+
 export interface CamKey {
 	t: number;
 	/** Posisi kamera. Kalau `follow` diisi, ini offset dari aktor itu. */
@@ -34,9 +44,17 @@ export interface ActorDef {
 	template?: string;
 	color?: Color3;
 	material?: Enum.Material;
-	weapon?: "jian";
+	weapon?: "jian" | "spear";
+	/** Pedang mesh dari ReplicatedStorage.CutsceneRigs (disalin server dari ServerStorage.Weapons). Kalau gak ada, pakai `weapon`. */
+	sword?: string;
+	/** Skala pedang mesh (1 = ukuran asli di ServerStorage). */
+	swordScale?: number;
 	/** Warna bayangan (afterimage) waktu gerak cepat. */
 	ghostColor?: Color3;
+	/** Garis cahaya di pinggir badan (Highlight). Grafik tinggi semua, grafik sedang cuma yang `key`. */
+	outline?: { color: Color3; alpha?: number; key?: boolean };
+	/** Aura qi di badan, dinyalain lewat event "aura". Grafik sedang ke atas. */
+	aura?: Color3;
 	/** CFrame telapak kaki, relatif ke origin. */
 	start: CFrame;
 	hidden?: boolean;
@@ -48,9 +66,19 @@ interface At {
 
 export type CutEvent = At &
 	(
-		| { kind: "sub"; who?: string; text: string; dur: number }
+		/** Subtitle. Kalau `zh` + `voice` diisi, kalimat Mandarin-nya diucapin (TTS Roblox) dan ikut tampil di atas teks Inggris. */
+		| { kind: "sub"; who?: string; text: string; dur: number; zh?: string; voice?: string }
+		/** Cuma suara Mandarin, tanpa subtitle (misal narator pas judul). */
+		| { kind: "voice"; zh: string; voice: string }
 		| { kind: "card"; name: string; cn?: string; epithet?: string; dur: number }
-		| { kind: "title"; text: string; sub?: string; dur: number }
+		| { kind: "title"; text: string; cn?: string; sub?: string; dur: number }
+		/** Ubah grading warna pelan-pelan (misal dunia jadi pucat pas waktu "berhenti"). */
+		| { kind: "grade"; to: Partial<GradeProps>; dur: number }
+		| { kind: "aura"; actor: string; on: boolean }
+		/** Gerakin properti set milik scene (CutsceneDef.props), misal Mata Langit membuka/menutup. */
+		| { kind: "prop"; name: string; to: number; dur: number; ease?: Ease }
+		/** Bekukan partikel set (butiran qi diam di udara) pas momen "waktu berhenti". */
+		| { kind: "freeze"; on: boolean }
 		| { kind: "fade"; to: number; dur: number; color?: Color3 }
 		| { kind: "shake"; mag: number; dur: number }
 		/** Hitstop + impact frame + garis kecepatan + guncangan. Inti rasa donghua. */
@@ -58,7 +86,22 @@ export type CutEvent = At &
 		/** Kecepatan timeline (slow-mo). 1 = normal. */
 		| { kind: "speed"; scale: number }
 		| { kind: "lines"; dur: number }
-		| { kind: "move"; actor: string; to: CFrame; dur: number; ease?: Ease; ghost?: boolean }
+		/** Pindah. `spin` = muter di tempat (derajat, sumbu tegak), `flip` = salto (derajat, sumbu kanan badan), ikut easing. */
+		| { kind: "move"; actor: string; to: CFrame; dur: number; ease?: Ease; ghost?: boolean; spin?: number; flip?: number }
+		/** Terhempas: melayang balistik + berputar, terus luruh jadi debu cahaya selama `fade` detik (kalau diisi). */
+		| { kind: "knock"; actor: string; dir: Vector3; power?: number; fade?: number }
+		/** Sayap kristal emas di punggung mekar / kuncup (kalau pedangnya punya LightWings, itu yang dipakai). */
+		| { kind: "wings"; actor: string; on: boolean }
+		/** Tangan pucat dua jari ngejepit ujung pedang aktor `target` (gantiin tangan balok R15 aktor ini). */
+		| { kind: "pinch"; actor: string; target: string }
+		/** Mode close-up aktor: outline mati + aura punggung disembunyiin. */
+		| { kind: "closeup"; actor: string; on: boolean }
+		/** Energi ngumpul ke ujung pedang selama `dur` detik (butiran ketarik masuk + pusaran). */
+		| { kind: "charge"; actor: string; dur: number; color?: Color3; scale?: number }
+		/** Kilau bintang di ujung pedang. */
+		| { kind: "glint"; actor: string }
+		/** Diam total (gak napas, gak goyang, gak mantul). Buat Sosok Diam dan momen waktu berhenti. */
+		| { kind: "still"; actor: string; on: boolean }
 		| { kind: "pose"; actor: string; pose: string; dur: number; ease?: Ease }
 		| { kind: "anim"; actor: string; animId: string; speed?: number }
 		| { kind: "show"; actor: string }
@@ -66,7 +109,22 @@ export type CutEvent = At &
 		| { kind: "break"; actor: string }
 		| {
 				kind: "vfx";
-				name: "slash" | "burst" | "ring" | "fall" | "debris" | "collapse";
+				name:
+					| "slash"
+					| "burst"
+					| "ring"
+					| "fall"
+					| "debris"
+					| "collapse"
+					| "wave"
+					| "lightning"
+					| "cracks"
+					| "spaceCrack"
+					| "rift"
+					| "shard"
+					| "streak"
+					| "cleave"
+					| "motes";
 				at: Vector3;
 				to?: Vector3;
 				/** Titik kontrol kurva buat fall (Bezier). */
@@ -78,9 +136,22 @@ export type CutEvent = At &
 				dur?: number;
 				scale?: number;
 				color?: Color3;
+				/** "ink" = lapisan tinta hitam + cipratan tinta (ciri khas pedang Bai Wuji). */
+				style?: "ink";
+				/** spaceCrack: detik (sejak muncul) retakan melebar satu tahap lagi. */
+				stages?: number[];
+				/** spaceCrack: detik (sejak muncul) ruangnya pecah kayak kaca. */
+				shatter?: number;
+				/**
+				 * spaceCrack / rift / shard / cracks: berapa lama bertahan sebelum menutup / hilang.
+				 * cleave: berapa lama sinar ditahan setelah meledak (`dur` = jeda garis tipis sebelum meledak).
+				 */
+				life?: number;
 		  }
-		| { kind: "sfx"; name: string; volume?: number }
-		| { kind: "music"; name: string; volume?: number; fade?: number }
+		/** SFX. Kalau loop dengan nama ini lagi jalan, event ini cuma ngubah volumenya pelan-pelan (`fade` detik), misal angin hening pas waktu berhenti. */
+	| { kind: "sfx"; name: string; volume?: number; pitch?: number; loop?: boolean; fade?: number }
+		/** Musik. `from` = mulai dari detik ke berapa di lagunya (biar bagian klimaks pas sama adegan). */
+		| { kind: "music"; name: string; volume?: number; fade?: number; from?: number }
 	);
 
 export interface CutsceneLook {
@@ -94,7 +165,7 @@ export interface CutsceneLook {
 		FogEnd: number;
 	}>;
 	atmosphere?: Partial<{ Density: number; Haze: number; Glare: number; Offset: number; Color: Color3; Decay: Color3 }>;
-	grade?: Partial<{ Brightness: number; Contrast: number; Saturation: number; TintColor: Color3 }>;
+	grade?: Partial<GradeProps>;
 	bloom?: Partial<{ Intensity: number; Size: number; Threshold: number }>;
 	/** Goyang kamera tangan (derajat). Bikin shot gak kaku. */
 	handheld?: number;
@@ -110,8 +181,10 @@ export interface CutsceneDef {
 	anchor?: string;
 	origin: CFrame;
 	look?: CutsceneLook;
-	/** Bikin set greybox lokal (cuma di client yang nonton). `low` = mode ringan (HP / grafik rendah). */
-	build?: (root: Folder, low: boolean) => void;
+	/** Bikin set lokal (cuma di client yang nonton). Detail ikut tier grafik. */
+	build?: (root: Folder, tier: Tier) => void;
+	/** Properti set yang bisa dianimasiin lewat event "prop". `set` dipanggil tiap frame selama tween. */
+	props?: Record<string, { init: number; set: (root: Folder, value: number) => void }>;
 	actors: ActorDef[];
 	camera: CamKey[];
 	events: CutEvent[];

@@ -1,18 +1,108 @@
-// Aktor cutscene: salinan rig R15 yang digerakin lewat HumanoidRootPart (anchored) dan C0 Motor6D.
+// Aktor cutscene: salinan rig R15 yang digerakin lewat HumanoidRootPart (anchored) + sendi. Sendi bisa Motor6D (rig lama)
+// atau AnimationConstraint (rig baru Roblox, dipakai place ini: dicek 4 Nov, Mannequin & avatar pemain 0 Motor6D).
 // Gak butuh animasi yang di-upload, jadi langsung jalan di game asli. Semua lokal di client.
+//
+// Biar gak kaku kayak slide PowerPoint:
+// - Tiap sendi ditarik pegas ke pose target (ada momentum + lewat dikit), ujung badan (kepala, siku, pergelangan)
+//   lebih telat dari pinggang = gerak susulan.
+// - Lapisan "hidup" di atasnya: napas, goyang kecil acak, mantul siaga, melayang di udara.
+// - Pindah tempat di tanah = kaki lari beneran (fase langkah ikut jarak), badan condong ke arah gerak.
+// - Rambut, jubah belakang, dan rumbai pedang bergoyang ikut percepatan badan.
 
 import { Players, ReplicatedStorage } from "@rbxts/services";
+import { TEX } from "shared/cutscene/audio";
 import { ease } from "shared/cutscene/ease";
-import { jointCFrame, POSES } from "shared/cutscene/poses";
+import { jointCFrame, jointVec, POSES } from "shared/cutscene/poses";
 import { ActorDef, Ease } from "shared/cutscene/types";
+import { Quality } from "./quality";
 
 const ID = new CFrame();
-const STRIKES = new Set(["slashFollow", "thrust"]);
+const UP = new Vector3(0, 1, 0);
+const GRAVITY = 42;
+const STRIKES = new Set(["slashFollow", "thrust", "spinSlash", "downSlash"]);
+/** Pose siaga: badan mantul pelan kayak siap tarung. */
+const ALERT = new Set(["guard", "drawStance", "spinReady"]);
+const ARM_JOINTS = new Set(["RightShoulder", "LeftShoulder", "RightElbow", "LeftElbow"]);
 const QI = Color3.fromRGB(190, 225, 255);
+const GILT = Color3.fromRGB(214, 172, 92);
+const STEEL = Color3.fromRGB(218, 224, 232);
+const CRIMSON = Color3.fromRGB(150, 26, 26);
+const GOLD = Color3.fromRGB(255, 205, 110);
+
+/** Kecepatan relatif tiap sendi ngejar target. Pinggang duluan, kepala & tangan telat = gerak susulan. */
+const GAIN: Record<string, number> = {
+	Root: 1.15,
+	Waist: 1.1,
+	Neck: 0.8,
+	RightShoulder: 1,
+	LeftShoulder: 0.92,
+	RightElbow: 0.85,
+	LeftElbow: 0.8,
+	RightWrist: 0.72,
+	LeftWrist: 0.68,
+	RightHip: 1,
+	LeftHip: 1,
+	RightKnee: 0.9,
+	LeftKnee: 0.9,
+	RightAnkle: 0.8,
+	LeftAnkle: 0.8,
+};
 
 interface Joint {
-	motor: Motor6D;
+	name: string;
+	motor?: Motor6D;
+	ac?: AnimationConstraint;
 	c0: CFrame;
+	/** [rx, ry, rz derajat, dy stud] sekarang, kecepatan, dan target. */
+	x: number[];
+	v: number[];
+	to: number[];
+	w: number;
+	z: number;
+	gain: number;
+}
+
+/** Goyangan bandul (rambut, jubah, rumbai): 2 sudut yang ditarik pegas ke arah kebalikan percepatan. */
+interface Sway {
+	part: BasePart;
+	apply: (ax: number, az: number) => void;
+	x: number[];
+	v: number[];
+	to: number[];
+	lastPos: Vector3;
+	lastVel: Vector3;
+	k: number;
+	max: number;
+	flutter: number;
+}
+
+/** Satu langkah pegas teredam, rumus pasti (stabil di FPS berapa pun). Ngubah x[i] dan v[i] langsung. */
+function springStep(x: number[], v: number[], to: number[], i: number, w: number, z: number, dt: number) {
+	const c1 = x[i] - to[i];
+	const v0 = v[i];
+	if (z >= 0.999) {
+		const c2 = v0 + w * c1;
+		const e = math.exp(-w * dt);
+		x[i] = to[i] + (c1 + c2 * dt) * e;
+		v[i] = (c2 - w * (c1 + c2 * dt)) * e;
+		return;
+	}
+	const wd = w * math.sqrt(1 - z * z);
+	const c2 = (v0 + z * w * c1) / wd;
+	const e = math.exp(-z * w * dt);
+	const cs = math.cos(wd * dt);
+	const sn = math.sin(wd * dt);
+	const a = c1 * cs + c2 * sn;
+	x[i] = to[i] + e * a;
+	v[i] = e * (-z * w * a + wd * (c2 * cs - c1 * sn));
+}
+
+/** Easing pose jadi redaman pegas: "back" mantul (lewat target lalu balik), "inOut" mulus tanpa lewat. */
+function damping(e: Ease | undefined) {
+	if (e === "back") return 0.5;
+	if (e === "out" || e === "expoOut") return 0.78;
+	if (e === "inOut" || e === "in") return 1;
+	return 0.85;
 }
 
 function cloneCharacter(): Model | undefined {
@@ -54,6 +144,28 @@ function paint(model: Model, color: Color3, material: Enum.Material, silhouette:
 	}
 }
 
+/** Satu bilah sayap kristal: dua wedge kaca (segitiga sama kaki) + tulang cahaya di tengahnya. */
+interface WingBlade {
+	parts: BasePart[];
+	welds: Weld[];
+	side: number;
+	theta: number;
+	len: number;
+	w: number;
+	delay: number;
+}
+
+interface WingRig {
+	folder: Folder;
+	blades: WingBlade[];
+	dust: ParticleEmitter[];
+	s: number;
+}
+
+/** Warna sayap kristal: kaca emas + tulang cahaya emas pucat. */
+const WING_GLASS = Color3.fromRGB(255, 210, 120);
+const WING_CORE = Color3.fromRGB(255, 238, 180);
+
 export class Actor {
 	readonly model: Model;
 	readonly root: BasePart;
@@ -62,18 +174,23 @@ export class Actor {
 	liveGhosts = 0;
 	lastGhost = -math.huge;
 	ghosting = false;
+	/** Diam total: napas, goyang, mantul siaga, dan melayang dimatiin (Sosok Diam, momen waktu berhenti). Pegas pose tetap jalan. */
+	still = false;
+	/** Emitter milik aktor (aura, debu luruh), didaftarin ke runtime biar ikut slow-mo. */
+	readonly fx: ParticleEmitter[] = [];
+	/** Dipanggil kalau aktor bikin emitter baru di tengah cutscene. */
+	onEmitter?: (e: ParticleEmitter) => void;
 
 	private parent: Instance;
+	private origin: CFrame;
+	private seed: number;
 	private lift: CFrame;
 	private feet: CFrame;
-	private joints = new Map<string, Joint>();
-	private cur = new Map<string, CFrame>();
-	private from = new Map<string, CFrame>();
-	private target = new Map<string, CFrame>();
-	private poseT0 = 0;
-	private poseDur = 1e-3;
-	private poseEase?: Ease;
-	private settled = true;
+	private joints: Joint[] = [];
+	private poseName = "idle";
+	private poseArms = false;
+	private lastNow = 0;
+	private energy = 0;
 
 	private moving = false;
 	private mFrom = ID;
@@ -81,26 +198,63 @@ export class Actor {
 	private mT0 = 0;
 	private mDur = 1e-3;
 	private mEase?: Ease;
+	private mSpin = 0;
+	private mFlip = 0;
+	private lastPos: Vector3;
+	private velS = Vector3.zero;
+	private accS = Vector3.zero;
+	private phase = 0;
+
+	private knocked = false;
+	private kT0 = 0;
+	private kStart = ID;
+	private kVel = Vector3.zero;
+	private kSpin = Vector3.zero;
+	private kFade?: number;
+	private fading?: Array<[BasePart | Decal, number]>;
+	private highlight?: Highlight;
 
 	private blade?: BasePart;
 	private bladeWeld?: Weld;
 	private edge?: BasePart;
 	private edgeWeld?: Weld;
 	private trail?: Trail;
+	private qiTrail?: Trail;
 	private trailOff = 0;
+	private swordParts: BasePart[] = [];
+	private swordFx: Array<ParticleEmitter | PointLight> = [];
+	private bladeGlow?: BasePart;
+	private wings?: BasePart;
+	private wingRig?: WingRig;
+	private wingA = 0;
+	private tier: number;
+	private particles: number;
+	private tipAtt?: Attachment;
+	private baseAtt?: Attachment;
+	private auraOn = false;
 	private animator?: Animator;
-	private ghostParts: BasePart[] = [];
+	/** Jumlah animasi upload yang lagi main. Selama ada, sendi dipegang Animator, pose pegas berhenti nulis. */
+	private animTracks = 0;
 
-	static create(def: ActorDef, parent: Instance, origin: CFrame): Actor | undefined {
+	private ghostParts: BasePart[] = [];
+	private auraFx: ParticleEmitter[] = [];
+	private auraLight?: PointLight;
+	private sways: Sway[] = [];
+
+	static create(def: ActorDef, parent: Instance, origin: CFrame, q: Quality): Actor | undefined {
 		const [model, needsPaint] = source(def);
 		if (!model) return undefined;
-		return new Actor(def, model, needsPaint, parent, origin);
+		return new Actor(def, model, needsPaint, parent, origin, q);
 	}
 
-	private constructor(def: ActorDef, model: Model, needsPaint: boolean, parent: Instance, origin: CFrame) {
+	private constructor(def: ActorDef, model: Model, needsPaint: boolean, parent: Instance, origin: CFrame, q: Quality) {
 		this.model = model;
 		this.parent = parent;
+		this.origin = origin;
 		this.ghostColor = def.ghostColor ?? QI;
+		this.seed = new Random().NextNumber(0, 100);
+		this.tier = q.tier;
+		this.particles = q.particles;
 		model.Name = `Actor_${def.id}`;
 
 		for (const d of model.GetDescendants()) {
@@ -117,8 +271,9 @@ export class Actor {
 			hum.BreakJointsOnDeath = false;
 			hum.RequiresNeck = false;
 			hum.EvaluateStateMachine = false;
-			this.animator = hum.FindFirstChildOfClass("Animator");
-			if (this.animator) for (const track of this.animator.GetPlayingAnimationTracks()) track.Stop(0);
+			const animator = hum.FindFirstChildOfClass("Animator");
+			if (animator) for (const track of animator.GetPlayingAnimationTracks()) track.Stop(0);
+			this.animator = animator;
 		}
 		const root = (model.FindFirstChild("HumanoidRootPart") as BasePart | undefined) ?? model.FindFirstChildWhichIsA("BasePart", true)!;
 		this.root = root;
@@ -129,33 +284,263 @@ export class Actor {
 				d.CanQuery = false;
 				d.CanTouch = false;
 				d.Massless = true;
-				if (d !== root && d.Transparency < 0.99) this.ghostParts.push(d);
+				// Baju berlapis (WrapLayer) gak ikut bayangan: kalau di-clone bentuknya balik ke mesh mentah
+				if (d !== root && d.Transparency < 0.99 && !d.FindFirstChildOfClass("WrapLayer")) this.ghostParts.push(d);
 			} else if (d.IsA("Motor6D")) {
-				this.joints.set(d.Name, { motor: d, c0: d.C0 });
+				this.addJoint(d.Name, d, undefined, d.C0);
 				d.Transform = ID;
+			} else if (d.IsA("AnimationConstraint")) {
+				// Pose lewat Transform (setara C0 * rot di Motor6D). Kinematic = kaku kayak Motor6D, gak ikut fisika
+				d.IsKinematic = true;
+				d.Transform = ID;
+				this.addJoint(d.Name, undefined, d, ID);
+			} else if (d.IsA("BallSocketConstraint")) {
+				d.Enabled = false;
 			}
 		}
 		const liftY = hum ? root.Size.Y / 2 + hum.HipHeight : 3;
 		this.lift = new CFrame(0, liftY, 0);
 		this.feet = origin.mul(def.start);
+		this.lastPos = this.feet.Position;
 		root.CFrame = this.feet.mul(this.lift);
 
-		if (def.weapon === "jian") this.attachJian();
+		const sword = def.sword !== undefined ? this.attachSword(def.sword, def.swordScale ?? 0.8, q) : false;
+		if (!sword && def.weapon) this.attachWeapon(def.weapon);
+		this.setupSway(q);
+		if (def.outline && (q.tier === 2 || (q.tier === 1 && def.outline.key === true))) {
+			const h = new Instance("Highlight");
+			h.FillTransparency = 1;
+			h.OutlineColor = def.outline.color;
+			h.OutlineTransparency = def.outline.alpha ?? 0.4;
+			h.DepthMode = Enum.HighlightDepthMode.Occluded;
+			h.Parent = model;
+			this.highlight = h;
+		}
+		if (def.aura && q.tier >= 1) this.makeAura(def.aura, q);
 		model.Parent = parent;
 		if (def.hidden) this.setVisible(false);
 	}
 
-	/** Pedang greybox di tangan kanan, dengan trail buat jejak tebasan. */
-	private attachJian() {
+	private addJoint(name: string, motor: Motor6D | undefined, ac: AnimationConstraint | undefined, c0: CFrame) {
+		this.joints.push({ name, motor, ac, c0, x: [0, 0, 0, 0], v: [0, 0, 0, 0], to: [0, 0, 0, 0], w: 8, z: 1, gain: GAIN[name] ?? 0.9 });
+	}
+
+	/** Rambut, jubah belakang, selempang pinggang: bandul di titik tempelnya. */
+	private setupSway(q: Quality) {
+		if (q.tier === 0) return;
+		for (const acc of this.model.GetChildren()) {
+			if (!acc.IsA("Accessory")) continue;
+			const handle = acc.FindFirstChild("Handle");
+			if (!handle || !handle.IsA("BasePart") || handle.FindFirstChildOfClass("WrapLayer")) continue;
+			const kind = acc.AccessoryType;
+			const settings =
+				kind === Enum.AccessoryType.Back
+					? { max: 20, k: 0.09, flutter: 2.5 }
+					: kind === Enum.AccessoryType.Hair
+						? { max: 6, k: 0.04, flutter: 0.6 }
+						: kind === Enum.AccessoryType.Waist
+							? { max: 12, k: 0.07, flutter: 1.5 }
+							: undefined;
+			if (!settings) continue;
+			const weld = handle.FindFirstChild("AccessoryWeld");
+			if (!weld || !weld.IsA("Weld")) continue;
+			const onC1 = weld.Part0 === handle;
+			const body = onC1 ? weld.Part1 : weld.Part0;
+			if (!body) continue;
+			const base = onC1 ? weld.C1 : weld.C0;
+			this.sways.push({
+				part: body,
+				apply: (ax, az) => {
+					const r = CFrame.Angles(math.rad(ax), 0, math.rad(az));
+					if (onC1) weld.C1 = base.mul(r);
+					else weld.C0 = base.mul(r);
+				},
+				x: [0, 0],
+				v: [0, 0],
+				to: [0, 0],
+				lastPos: body.Position,
+				lastVel: Vector3.zero,
+				...settings,
+			});
+		}
+	}
+
+	/** Aura qi naik dari badan (mati dulu, nyala lewat setAura). */
+	private makeAura(color: Color3, q: Quality) {
+		const torso = (this.model.FindFirstChild("UpperTorso") as BasePart | undefined) ?? this.root;
+		const add = (props: Partial<WritableInstanceProperties<ParticleEmitter>>) => {
+			const e = new Instance("ParticleEmitter");
+			e.Enabled = false;
+			e.LightEmission = 1;
+			e.LightInfluence = 0;
+			e.EmissionDirection = Enum.NormalId.Top;
+			for (const [k, v] of pairs(props as Record<string, unknown>)) (e as unknown as Record<string, unknown>)[k] = v;
+			e.Parent = torso;
+			this.auraFx.push(e);
+			this.fx.push(e);
+		};
+		add({
+			Texture: TEX.glow,
+			Color: new ColorSequence(color, new Color3(1, 1, 1)),
+			Size: new NumberSequence([new NumberSequenceKeypoint(0, 1.8), new NumberSequenceKeypoint(1, 0)]),
+			Transparency: new NumberSequence([new NumberSequenceKeypoint(0, 0.45), new NumberSequenceKeypoint(1, 1)]),
+			Lifetime: new NumberRange(0.5, 0.9),
+			Speed: new NumberRange(2, 5),
+			SpreadAngle: new Vector2(30, 30),
+			Acceleration: new Vector3(0, 8, 0),
+			Rate: math.floor(36 * q.particles),
+		});
+		if (q.tier === 2) {
+			add({
+				Texture: TEX.smokeFlip,
+				FlipbookLayout: Enum.ParticleFlipbookLayout.Grid4x4,
+				FlipbookMode: Enum.ParticleFlipbookMode.OneShot,
+				Color: new ColorSequence(color),
+				LightEmission: 0.8,
+				Size: new NumberSequence([new NumberSequenceKeypoint(0, 1.2), new NumberSequenceKeypoint(1, 3.2)]),
+				Transparency: new NumberSequence([new NumberSequenceKeypoint(0, 0.55), new NumberSequenceKeypoint(1, 1)]),
+				Lifetime: new NumberRange(0.5, 0.8),
+				Speed: new NumberRange(1, 3),
+				Rotation: new NumberRange(0, 360),
+				Acceleration: new Vector3(0, 10, 0),
+				Rate: 14,
+			});
+			const light = new Instance("PointLight");
+			light.Color = color;
+			light.Range = 12;
+			light.Brightness = 2;
+			light.Enabled = false;
+			light.Parent = torso;
+			this.auraLight = light;
+		}
+	}
+
+	/** Aura + pedang ikut bercahaya. */
+	setAura(on: boolean) {
+		this.auraOn = on;
+		for (const e of this.auraFx) e.Enabled = on;
+		if (this.auraLight) this.auraLight.Enabled = on;
+		if (this.bladeGlow) this.bladeGlow.Transparency = on ? 0.5 : 1;
+	}
+
+	/**
+	 * Pedang mesh asli (model senjata yang udah ada di place, disalin server ke CutsceneRigs). Dipegang lurus ke -Z tangan,
+	 * sama kayak jian part lama, jadi pose lama tetap cocok.
+	 */
+	private attachSword(name: string, scale: number, q: Quality): boolean {
+		const hand = this.model.FindFirstChild("RightHand") as BasePart | undefined;
+		const src = ReplicatedStorage.FindFirstChild("CutsceneRigs")?.FindFirstChild(name);
+		if (!hand || !src || !src.IsA("Model")) return false;
+		const sword = src.Clone();
+		const handle = sword.FindFirstChild("Handle");
+		if (!handle || !handle.IsA("BasePart")) {
+			sword.Destroy();
+			return false;
+		}
+		sword.PrimaryPart = handle;
+		// Pengaman: las yang ujungnya kosong (nunjuk ke part yang gak ada di client) diganti las ke Handle,
+		// posisi relatif tetap. Tanpa ini bilah lepas dan jatuh
+		for (const d of sword.GetDescendants()) {
+			if (!d.IsA("JointInstance") && !d.IsA("WeldConstraint")) continue;
+			if (d.Part0 && d.Part1) continue;
+			const part = d.Part1 ?? d.Part0 ?? (d.Parent && d.Parent.IsA("BasePart") ? d.Parent : undefined);
+			d.Destroy();
+			if (!part || part === handle) continue;
+			const fix = new Instance("WeldConstraint");
+			fix.Part0 = handle;
+			fix.Part1 = part;
+			fix.Parent = part;
+		}
+		pcall(() => sword.ScaleTo(scale));
+		const gripAtt = hand.FindFirstChild("RightGripAttachment") as Attachment | undefined;
+		const gripPos = gripAtt ? gripAtt.Position : new Vector3(0, -0.17, 0);
+		const grip = new CFrame(gripPos).mul(CFrame.Angles(-math.pi / 2, 0, 0));
+		sword.PivotTo(hand.CFrame.mul(grip));
+		for (const d of sword.GetDescendants()) {
+			if (d.IsA("BasePart")) {
+				d.Anchored = false;
+				d.CanCollide = false;
+				d.CanQuery = false;
+				d.CanTouch = false;
+				d.Massless = true;
+				d.CastShadow = false;
+				this.swordParts.push(d);
+				if (d.Transparency < 0.99) this.ghostParts.push(d);
+			} else if (d.IsA("Trail")) {
+				d.Enabled = false;
+				if (d.Name === "QiTrail") this.qiTrail = d;
+				else this.trail = d;
+			} else if (d.IsA("ParticleEmitter")) {
+				// Kilau kecil di bilah tetap nyala (mewah), sisanya cuma di grafik tinggi
+				d.Enabled = d.Name === "VFX_Sparks" ? true : q.tier === 2 && d.Enabled;
+				if (d.Enabled) d.Rate = d.Rate * q.particles;
+				this.fx.push(d);
+				this.swordFx.push(d);
+			} else if (d.IsA("PointLight")) {
+				d.Enabled = q.lights;
+				this.swordFx.push(d);
+			} else if (d.IsA("Attachment")) {
+				if (d.Name === "BladeTip") this.tipAtt = d;
+				else if (d.Name === "BladeBase") this.baseAtt = d;
+			} else if (d.IsA("Bone") && q.tier >= 1) {
+				// Bone pertama di rantai (induknya MeshPart rumbai)
+				const owner = d.Parent;
+				if (owner && owner.IsA("BasePart")) this.addTassel(owner, d);
+			}
+		}
+		this.bladeGlow = sword.FindFirstChild("BladeGlow") as BasePart | undefined;
+		this.wings = sword.FindFirstChild("LightWings") as BasePart | undefined;
+		if (this.bladeGlow) this.bladeGlow.Transparency = 1;
+		if (this.wings) this.wings.Transparency = 1;
+		const weld = new Instance("Weld");
+		weld.Part0 = hand;
+		weld.Part1 = handle;
+		weld.C0 = grip;
+		weld.Parent = handle;
+		sword.Name = "Sword";
+		sword.Parent = this.model;
+		return true;
+	}
+
+	/** Rumbai pedang (rantai Bone): makin ke ujung makin besar goyangnya. */
+	private addTassel(part: BasePart, first: Bone) {
+		const chain: Bone[] = [];
+		let b: Instance | undefined = first;
+		while (b && b.IsA("Bone")) {
+			chain.push(b);
+			b = b.FindFirstChildWhichIsA("Bone");
+		}
+		this.sways.push({
+			part,
+			apply: (ax, az) => {
+				chain.forEach((bone, i) => {
+					const f = 0.22 + 0.06 * i;
+					bone.Transform = CFrame.Angles(math.rad(ax * f), 0, math.rad(az * f));
+				});
+			},
+			x: [0, 0],
+			v: [0, 0],
+			to: [0, 0],
+			lastPos: part.Position,
+			lastVel: Vector3.zero,
+			k: 0.16,
+			max: 70,
+			flutter: 4,
+		});
+	}
+
+	/** Senjata part (cadangan kalau pedang mesh gak ada): jian atau tombak, dengan trail. */
+	private attachWeapon(kind: "jian" | "spear") {
 		const hand = (this.model.FindFirstChild("RightHand") ?? this.model.FindFirstChild("Right Arm")) as BasePart | undefined;
 		if (!hand) return;
 		const grip = new CFrame(0, -0.25, 0);
-		const make = (name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material): [Part, Weld] => {
+		const make = (name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material, shape?: Enum.PartType): [Part, Weld] => {
 			const p = new Instance("Part");
 			p.Name = name;
 			p.Size = size;
 			p.Color = color;
 			p.Material = material;
+			if (shape) p.Shape = shape;
 			p.CanCollide = false;
 			p.CanQuery = false;
 			p.CanTouch = false;
@@ -168,20 +553,37 @@ export class Actor {
 			w.C0 = grip.mul(offset);
 			w.Parent = p;
 			p.Parent = this.model;
+			this.ghostParts.push(p);
 			return [p, w];
 		};
-		make("Grip", new Vector3(0.22, 0.22, 1), new CFrame(0, 0, 0.1), Color3.fromRGB(60, 40, 30), Enum.Material.Wood);
-		make("Guard", new Vector3(0.18, 0.85, 0.2), new CFrame(0, 0, -0.5), Color3.fromRGB(200, 165, 90), Enum.Material.Metal);
-		const [blade, bladeWeld] = make("Blade", new Vector3(0.08, 0.3, 4.4), new CFrame(0, 0, -2.8), Color3.fromRGB(215, 220, 228), Enum.Material.Metal);
-		const [edge, edgeWeld] = make("Edge", new Vector3(0.04, 0.06, 4.3), new CFrame(0, 0.15, -2.8), QI, Enum.Material.Neon);
+		let blade: Part;
+		let bladeWeld: Weld;
+		let edge: Part;
+		let edgeWeld: Weld;
+		if (kind === "jian") {
+			make("Grip", new Vector3(0.2, 0.2, 1), new CFrame(0, 0, 0.1), Color3.fromRGB(74, 26, 22), Enum.Material.Fabric);
+			make("Pommel", new Vector3(0.3, 0.3, 0.3), new CFrame(0, 0, 0.68), GILT, Enum.Material.Metal, Enum.PartType.Ball);
+			make("Tassel", new Vector3(0.09, 0.09, 0.7), new CFrame(0, -0.32, 0.86).mul(CFrame.Angles(math.rad(70), 0, 0)), CRIMSON, Enum.Material.Fabric);
+			make("Guard", new Vector3(0.16, 0.95, 0.22), new CFrame(0, 0, -0.5), GILT, Enum.Material.Metal);
+			[blade, bladeWeld] = make("Blade", new Vector3(0.06, 0.24, 4.4), new CFrame(0, 0, -2.8), STEEL, Enum.Material.Metal);
+			[edge, edgeWeld] = make("Edge", new Vector3(0.03, 0.05, 4.3), new CFrame(0, 0.13, -2.8), QI, Enum.Material.Neon);
+		} else {
+			make("Shaft", new Vector3(0.16, 0.16, 8.4), new CFrame(0, 0, -1.6), Color3.fromRGB(92, 30, 24), Enum.Material.Wood);
+			make("Butt", new Vector3(0.2, 0.2, 0.45), new CFrame(0, 0, 2.55), GILT, Enum.Material.Metal);
+			make("Collar", new Vector3(0.24, 0.24, 0.32), new CFrame(0, 0, -5.75), GILT, Enum.Material.Metal);
+			make("Tassel", new Vector3(0.55, 0.55, 0.55), new CFrame(0, -0.18, -5.5), CRIMSON, Enum.Material.Fabric, Enum.PartType.Ball);
+			[blade, bladeWeld] = make("Blade", new Vector3(0.06, 0.34, 1.3), new CFrame(0, 0, -6.55), STEEL, Enum.Material.Metal);
+			[edge, edgeWeld] = make("Edge", new Vector3(0.03, 0.05, 1.25), new CFrame(0, 0.17, -6.55), this.ghostColor, Enum.Material.Neon);
+		}
 		edge.Transparency = 0.3;
-		blade.Reflectance = 0.2;
+		blade.Reflectance = 0.25;
 
+		const half = blade.Size.Z / 2;
 		const a0 = new Instance("Attachment");
-		a0.Position = new Vector3(0, 0, 2);
+		a0.Position = new Vector3(0, 0, half * 0.9);
 		a0.Parent = blade;
 		const a1 = new Instance("Attachment");
-		a1.Position = new Vector3(0, 0, -2.2);
+		a1.Position = new Vector3(0, 0, -half);
 		a1.Parent = blade;
 		const trail = new Instance("Trail");
 		trail.Attachment0 = a0;
@@ -200,58 +602,405 @@ export class Actor {
 		this.edge = edge;
 		this.edgeWeld = edgeWeld;
 		this.trail = trail;
+		this.tipAtt = a1;
+		this.baseAtt = a0;
 	}
 
 	setPose(name: string, dur: number, e: Ease | undefined, now: number) {
 		const pose = POSES[name] ?? {};
-		for (const [n] of this.joints) {
-			this.from.set(n, this.cur.get(n) ?? ID);
-			this.target.set(n, jointCFrame(pose[n]));
+		this.poseName = name;
+		this.poseArms = pose.RightShoulder !== undefined || pose.LeftShoulder !== undefined;
+		const instant = dur <= 0.02;
+		const w = math.clamp(4.4 / math.max(dur, 0.02), 2.5, 75);
+		const z = damping(e);
+		for (const j of this.joints) {
+			const target = jointVec(pose[j.name]);
+			for (let i = 0; i < 4; i++) {
+				j.to[i] = target[i];
+				if (instant) {
+					j.x[i] = target[i];
+					j.v[i] = 0;
+				}
+			}
+			j.w = w * j.gain;
+			// Ujung badan sedikit lebih "kenyal"
+			j.z = z >= 0.999 ? 1 : z * (j.gain < 0.9 ? 0.9 : 1);
 		}
-		this.poseT0 = now;
-		this.poseDur = math.max(dur, 1e-3);
-		this.poseEase = e;
-		this.settled = false;
-		if (this.trail && STRIKES.has(name)) {
-			this.trail.Enabled = true;
-			this.trailOff = now + dur + 0.25;
+		if (STRIKES.has(name)) {
+			if (this.trail) this.trail.Enabled = true;
+			if (this.qiTrail && this.auraOn) this.qiTrail.Enabled = true;
+			this.trailOff = now + math.max(dur, 0.1) + 0.3;
 		}
 	}
 
-	moveTo(feet: CFrame, dur: number, e: Ease | undefined, now: number, ghost: boolean) {
+	moveTo(feet: CFrame, dur: number, e: Ease | undefined, now: number, ghost: boolean, spin = 0, flip = 0) {
 		this.mFrom = this.feet;
 		this.mTo = feet;
 		this.mT0 = now;
 		this.mDur = math.max(dur, 1e-3);
 		this.mEase = e;
+		this.mSpin = spin;
+		this.mFlip = flip;
 		this.moving = true;
 		this.ghosting = ghost;
 	}
 
+	/** Terhempas: lempar balistik + muter, luruh jadi debu cahaya kalau `fade` diisi. */
+	knock(dir: Vector3, power: number, fade: number | undefined, now: number) {
+		const rng = new Random();
+		const flat = new Vector3(dir.X, 0, dir.Z);
+		const d = flat.Magnitude > 0.01 ? flat.Unit : new Vector3(0, 0, 1);
+		this.knocked = true;
+		this.moving = false;
+		this.kT0 = now;
+		this.kStart = this.root.CFrame;
+		this.kVel = d.mul(power).add(UP.mul(power * 0.45 + dir.Y * power));
+		this.kSpin = new Vector3(rng.NextNumber(2, 5) * (rng.NextNumber() < 0.5 ? -1 : 1), rng.NextNumber(-3, 3), rng.NextNumber(-4, 4));
+		this.kFade = fade;
+		this.ghosting = false;
+		this.setPose("hitFly", 0.1, "out", now);
+	}
+
+	/** Mainin animasi upload (event "anim"). Pose pegas berhenti nulis sendi sampai animasinya selesai. */
 	playAnim(id: string, speed: number) {
 		if (!this.animator) return;
 		const anim = new Instance("Animation");
 		anim.AnimationId = id;
 		const track = this.animator.LoadAnimation(anim);
+		this.animTracks += 1;
+		track.Stopped.Once(() => (this.animTracks = math.max(0, this.animTracks - 1)));
 		track.Play(0.1, 1, speed);
 	}
 
-	/** Patahin pedang. Balikin posisi ujung lama (buat serpihan). */
-	breakBlade(): Vector3 | undefined {
-		const blade = this.blade;
-		if (!blade || !this.bladeWeld) return undefined;
-		const tip = blade.CFrame.PointToWorldSpace(new Vector3(0, 0, -blade.Size.Z / 2));
-		const len = blade.Size.Z * 0.35;
-		const grip = new CFrame(0, -0.25, 0);
-		blade.Size = new Vector3(blade.Size.X, blade.Size.Y, len);
-		this.bladeWeld.C0 = grip.mul(new CFrame(0, 0, -0.6 - len / 2));
-		if (this.edge && this.edgeWeld) {
-			this.edge.Size = new Vector3(this.edge.Size.X, this.edge.Size.Y, len);
-			this.edgeWeld.C0 = grip.mul(new CFrame(0, 0.15, -0.6 - len / 2));
+	/**
+	 * Sayap: 0 kuncup + hilang, 1 mekar penuh. Sayap kristal emas di punggung (bilah kaca emas bertulang
+	 * cahaya, mekar kayak kipas dari atas ke bawah). LightWings bawaan pedang tetap disembunyiin, soalnya
+	 * itu cuma pelat neon datar dan nutupin sayap kristal.
+	 */
+	setWings(a: number) {
+		if (this.wings) this.wings.Transparency = 1;
+		if (!this.wingRig) {
+			if (a <= 0) return;
+			this.wingRig = this.buildWings();
+		}
+		this.wingA = math.clamp(a, 0, 1);
+		for (const e of this.wingRig.dust) e.Enabled = this.wingA > 0.5;
+		this.poseWings(this.lastNow);
+	}
+
+	private buildWings(): WingRig {
+		const torso = (this.model.FindFirstChild("UpperTorso") as BasePart | undefined) ?? this.root;
+		const s = this.root.Size.Y / 2;
+		// Di luar model biar gak ikut outline Highlight, tapi tetap dilas ke badan
+		const folder = new Instance("Folder");
+		folder.Name = "CrystalWings";
+		folder.Parent = this.parent;
+		const n = this.tier === 2 ? 6 : this.tier === 1 ? 5 : 4;
+		const lens = [0.86, 1, 0.92, 0.78, 0.62, 0.48];
+		const blades: WingBlade[] = [];
+		const dust: ParticleEmitter[] = [];
+		for (const side of [1, -1]) {
+			for (let i = 0; i < n; i++) {
+				const k = i / (n - 1);
+				const make = (cls: "WedgePart" | "Part", material: Enum.Material, color: Color3) => {
+					const p = new Instance(cls);
+					p.Name = "Wing";
+					p.Anchored = false;
+					p.CanCollide = false;
+					p.CanQuery = false;
+					p.CanTouch = false;
+					p.Massless = true;
+					p.CastShadow = false;
+					p.Material = material;
+					p.Color = color;
+					p.Transparency = 1;
+					p.Parent = folder;
+					const w = new Instance("Weld");
+					w.Part0 = torso;
+					w.Part1 = p;
+					w.Parent = p;
+					return [p, w] as const;
+				};
+				const [upper, w0] = make("WedgePart", Enum.Material.Glass, WING_GLASS);
+				const [lower, w1] = make("WedgePart", Enum.Material.Glass, WING_GLASS);
+				const [spine, w2] = make("Part", Enum.Material.Neon, WING_CORE);
+				upper.Reflectance = 0.15;
+				lower.Reflectance = 0.15;
+				const idx = math.floor(k * (lens.size() - 1) + 0.5);
+				blades.push({
+					parts: [upper, lower, spine],
+					welds: [w0, w1, w2],
+					side,
+					theta: math.rad(14 + k * 104),
+					len: 7.5 * s * lens[idx] * (this.tier === 0 ? 0.85 : 1),
+					w: 1.05 * s * (1 - 0.3 * k),
+					delay: i * 0.07,
+				});
+				// Serbuk emas jatuh dari dua bilah paling atas
+				if (i < 2 && this.tier >= 1) {
+					const e = new Instance("ParticleEmitter");
+					e.Texture = TEX.glow;
+					e.Shape = Enum.ParticleEmitterShape.Box;
+					e.Color = new ColorSequence(WING_CORE, WING_GLASS);
+					e.LightEmission = 1;
+					e.LightInfluence = 0;
+					e.Size = new NumberSequence([new NumberSequenceKeypoint(0, 0.25 * s), new NumberSequenceKeypoint(1, 0)]);
+					e.Transparency = new NumberSequence([new NumberSequenceKeypoint(0, 0.2), new NumberSequenceKeypoint(1, 1)]);
+					e.Lifetime = new NumberRange(0.8, 1.4);
+					e.Speed = new NumberRange(0.5, 2);
+					e.SpreadAngle = new Vector2(180, 180);
+					e.Acceleration = new Vector3(0, -3, 0);
+					e.Rate = math.floor(25 * this.particles);
+					e.Enabled = false;
+					e.Parent = spine;
+					dust.push(e);
+					this.fx.push(e);
+					this.onEmitter?.(e);
+				}
+			}
+		}
+		return { folder, blades, dust, s };
+	}
+
+	/** Atur sudut, panjang, dan bening tiap bilah dari wingA (mekar berurutan) + kepak halus biar hidup. */
+	private poseWings(now: number) {
+		const rig = this.wingRig;
+		if (!rig) return;
+		const s = rig.s;
+		const back = new Vector3(0, 0, 1);
+		const maxDelay = rig.blades.reduce((m, b) => math.max(m, b.delay), 0);
+		const sweep = math.rad(28);
+		for (const b of rig.blades) {
+			const e = ease("out", math.clamp((this.wingA - b.delay) / math.max(1 - maxDelay, 0.1), 0, 1));
+			const flap = math.sin(now * 2.2 + b.theta * 3) * math.rad(3) * e;
+			const theta = math.rad(168) + (b.theta - math.rad(168)) * e + flap;
+			const len = b.len * (0.45 + 0.55 * e);
+			// Arah bilah di ruang badan: menyebar ke samping dari atas ke bawah, condong ke belakang
+			const dir = new Vector3(b.side * math.sin(theta) * math.cos(sweep), math.cos(theta) * math.cos(sweep), math.sin(sweep));
+			const base = new Vector3(b.side * 0.42 * s, 0.38 * s, 0.5 * s);
+			const zAxis = dir.mul(-1);
+			const xAxis = back.sub(dir.mul(back.Dot(dir))).Unit;
+			const yAxis = zAxis.Cross(xAxis);
+			const cf = CFrame.fromMatrix(base.add(dir.mul(len / 2)), xAxis, yAxis, zAxis);
+			const t = 0.08 * s;
+			const [upper, lower, spine] = b.parts;
+			upper.Size = new Vector3(t, b.w / 2, len);
+			lower.Size = new Vector3(t, b.w / 2, len);
+			spine.Size = new Vector3(t * 1.6, b.w * 0.09, len * 0.92);
+			b.welds[0].C0 = cf.mul(new CFrame(0, b.w / 4, 0));
+			b.welds[1].C0 = cf.mul(new CFrame(0, -b.w / 4, 0)).mul(CFrame.Angles(0, 0, math.pi));
+			b.welds[2].C0 = cf.mul(new CFrame(0, 0, len * 0.04));
+			const glass = e <= 0.001 ? 1 : 1 - 0.65 * e;
+			upper.Transparency = glass;
+			lower.Transparency = glass;
+			spine.Transparency = e <= 0.001 ? 1 : 1 - 0.95 * e;
+		}
+	}
+
+	/**
+	 * Mode close-up: outline Highlight mati (dari dekat jadi garis putus-putus aneh di jubah) dan aksesori punggung
+	 * kaku kayak aura disembunyiin (mesh-nya opaque, dari dekat cuma jadi gumpalan abu-abu buram).
+	 */
+	setCloseup(on: boolean) {
+		if (this.highlight) this.highlight.Enabled = !on;
+		for (const acc of this.model.GetChildren()) {
+			if (!acc.IsA("Accessory") || acc.AccessoryType !== Enum.AccessoryType.Back) continue;
+			const h = acc.FindFirstChild("Handle");
+			if (h && h.IsA("BasePart") && !h.FindFirstChildOfClass("WrapLayer")) h.LocalTransparencyModifier = on ? 1 : 0;
+		}
+	}
+
+	/**
+	 * Tangan pucat kayak giok yang ngejepit ujung pedang pakai dua jari (telunjuk di atas bilah, jari tengah di bawah,
+	 * jari manis + kelingking ditekuk, jempol nempel di samping). Tangan R15 bawaan cuma balok, jadi disembunyiin dan
+	 * diganti ini, lengan baloknya juga diganti lengan baju hanfu lebar. Dibangun dari ujung pedang (`tip`) ke arah
+	 * lengan bawah, jadi selalu pas sama posisi jepitan. Part-nya anchored (Sosok Diam gak gerak lagi) dan ikut
+	 * ke-hide bareng modelnya.
+	 */
+	pinchHand(tip: Vector3, flat?: [Vector3, number]) {
+		const hand = this.model.FindFirstChild("RightHand") as BasePart | undefined;
+		const fore = (this.model.FindFirstChild("RightLowerArm") as BasePart | undefined) ?? hand;
+		if (!fore) return;
+		const back = fore.Position.sub(tip);
+		if (back.Magnitude < 0.05) return;
+		const s = this.root.Size.Y / 2;
+		// Frame tangan: titik nol di ujung pedang, LookVector ke arah jari nunjuk (menjauh dari lengan),
+		// sumbu atas = normal sisi datar bilah, jadi dua jari ngejepit sisi datarnya
+		const T = CFrame.lookAt(tip, tip.sub(back.Unit), flat ? flat[0] : UP);
+		// Setengah tebal bilah + celah dikit (dalam satuan s biar bisa dicampur sama ukuran jari)
+		// (ukuran kotak part bilah bisa kegedean karena ikut pelindung tangan, jadi dibatesin ke tebal bilah wajar)
+		const h = ((flat ? math.clamp(flat[1], 0.02, 0.07) : 0.06) / 2 + 0.004) / s;
+		const folder = new Instance("Folder");
+		folder.Name = "PinchHand";
+		folder.Parent = this.model;
+		const SKIN_JADE = Color3.fromRGB(230, 228, 236);
+		const part = (shape: Enum.PartType, size: Vector3, cf: CFrame) => {
+			const p = new Instance("Part");
+			p.Name = "Hand";
+			p.Anchored = true;
+			p.CanCollide = false;
+			p.CanQuery = false;
+			p.CanTouch = false;
+			p.Massless = true;
+			p.Material = Enum.Material.SmoothPlastic;
+			p.Color = SKIN_JADE;
+			p.Shape = shape;
+			p.Size = size;
+			p.CFrame = cf;
+			p.Parent = folder;
+			return p;
+		};
+		const L = (x: number, y: number, z: number) => T.PointToWorldSpace(new Vector3(x * s, y * s, z * s));
+		// Kapsul (ruas jari) dari a ke b, radius r
+		const capsule = (a: Vector3, b: Vector3, r: number) => {
+			const d = b.sub(a);
+			const dir = d.Unit;
+			const ref = math.abs(dir.Dot(UP)) > 0.95 ? new Vector3(1, 0, 0) : UP;
+			const y = ref.sub(dir.mul(ref.Dot(dir))).Unit;
+			part(Enum.PartType.Cylinder, new Vector3(d.Magnitude, r * 2, r * 2), CFrame.fromMatrix(a.Lerp(b, 0.5), dir, y));
+			part(Enum.PartType.Ball, new Vector3(r * 2, r * 2, r * 2), new CFrame(a));
+			part(Enum.PartType.Ball, new Vector3(r * 2, r * 2, r * 2), new CFrame(b));
+		};
+		const ellipsoid = (x: number, y: number, z: number, size: Vector3) => {
+			const p = part(Enum.PartType.Block, size.mul(s), T.mul(new CFrame(x * s, y * s, z * s)));
+			const mesh = new Instance("SpecialMesh");
+			mesh.MeshType = Enum.MeshType.Sphere;
+			mesh.Parent = p;
+		};
+		// Telapak tegak (oval), jari nunjuk ke depan (-Z lokal)
+		ellipsoid(0, -0.01, 0.5, new Vector3(0.13, 0.3, 0.36));
+		// Telunjuk di atas bilah, jari tengah di bawah (sedikit lebih panjang), dua ruas biar ada lekuk
+		capsule(L(0, h + 0.06, 0.33), L(0, h + 0.048, 0.12), 0.04 * s);
+		capsule(L(0, h + 0.048, 0.12), L(0, h + 0.036, -0.07), 0.036 * s);
+		capsule(L(0, -h - 0.02, 0.33), L(0, -h - 0.03, 0.11), 0.042 * s);
+		capsule(L(0, -h - 0.03, 0.11), L(0, -h - 0.038, -0.09), 0.038 * s);
+		// Jari manis + kelingking ditekuk ke telapak, jempol nempel di samping
+		ellipsoid(0, -h - 0.09, 0.27, new Vector3(0.085, 0.075, 0.13));
+		ellipsoid(0, -h - 0.14, 0.31, new Vector3(0.075, 0.065, 0.11));
+		capsule(L(-0.06, -h - 0.06, 0.45), L(-0.055, -h - 0.085, 0.25), 0.042 * s);
+		// Pergelangan masuk ke lengan baju
+		capsule(L(0, -0.01, 0.62), L(0, -0.01, 0.98), 0.075 * s);
+		const hide = new Array<BasePart>();
+		if (hand) hide.push(hand);
+		// Lengan balok juga diganti lengan baju hanfu lebar warna gelap, tangan giok keluar dari ujungnya.
+		// Tanpa ini telapaknya ketelen balok lengan bawah (tebel 1 stud) dan yang kelihatan cuma ujung jari.
+		const upper = this.model.FindFirstChild("RightUpperArm") as BasePart | undefined;
+		if (upper && fore !== hand) {
+			const pt = (p: BasePart, name: string) => {
+				const a = p.FindFirstChild(name);
+				return a && a.IsA("Attachment") ? a.WorldPosition : p.CFrame.PointToWorldSpace(new Vector3(0, p.Size.Y / 2, 0));
+			};
+			const shoulder = pt(upper, "RightShoulderRigAttachment");
+			const elbow = pt(fore, "RightElbowRigAttachment");
+			const cuff = tip.add(back.Unit.mul(0.8 * s));
+			const SLEEVE = Color3.fromRGB(26, 25, 32);
+			const cloth = (shape: Enum.PartType, size: Vector3, cf: CFrame, color = SLEEVE) => {
+				const p = part(shape, size, cf);
+				p.Material = Enum.Material.Fabric;
+				p.Color = color;
+			};
+			const tube = (a: Vector3, b: Vector3, d: number, color?: Color3) => {
+				const v = b.sub(a);
+				if (v.Magnitude < 0.02) return;
+				const dir = v.Unit;
+				const ref = math.abs(dir.Dot(UP)) > 0.95 ? new Vector3(1, 0, 0) : UP;
+				const y = ref.sub(dir.mul(ref.Dot(dir))).Unit;
+				cloth(Enum.PartType.Cylinder, new Vector3(v.Magnitude, d, d), CFrame.fromMatrix(a.Lerp(b, 0.5), dir, y), color);
+			};
+			const ball = (p: Vector3, d: number) => cloth(Enum.PartType.Ball, new Vector3(d, d, d), new CFrame(p));
+			ball(shoulder, 0.95 * s);
+			tube(shoulder, elbow, 0.95 * s);
+			ball(elbow, 1 * s);
+			// Lengan bawah melebar ke ujung, mulut lengan baju gelap di ujungnya
+			const mid = elbow.Lerp(cuff, 0.5);
+			tube(elbow, mid, 1.05 * s);
+			tube(mid, cuff, 1.25 * s);
+			const arm = cuff.sub(elbow);
+			if (arm.Magnitude > 0.1) {
+				const a = arm.Unit;
+				tube(cuff, cuff.add(a.mul(0.02)), 1.1 * s, Color3.fromRGB(7, 7, 9));
+				// Kain lengan baju yang menggantung di bawah lengan (segitiga, paling dalam di ujung)
+				const flat = UP.sub(a.mul(UP.Dot(a)));
+				if (flat.Magnitude > 0.3) {
+					const down = flat.Unit.mul(-1);
+					const H = 0.9 * s;
+					const drape = new Instance("WedgePart");
+					drape.Name = "Sleeve";
+					drape.Anchored = true;
+					drape.CanCollide = false;
+					drape.CanQuery = false;
+					drape.CanTouch = false;
+					drape.Material = Enum.Material.Fabric;
+					drape.Color = SLEEVE;
+					drape.Size = new Vector3(0.05 * s, H, arm.Magnitude);
+					// Siku siku wedge (Y-, Z+) = atas di ujung lengan baju
+					drape.CFrame = CFrame.fromMatrix(mid.add(down.mul(0.5 * s + H / 2)), down.Cross(a), down, a);
+					drape.Parent = folder;
+				}
+			}
+			hide.push(upper, fore);
+		}
+		for (const p of hide) {
+			p.Transparency = 1;
+			for (const d of p.GetDescendants()) if (d.IsA("Decal")) d.Transparency = 1;
+		}
+	}
+
+	/** Normal sisi datar bilah + tebalnya (sumbu tertipis part bilah yang bukan arah panjang bilah). */
+	bladeFlat(): [Vector3, number] | undefined {
+		const tip = this.tipAtt;
+		const base = this.baseAtt;
+		const blade = tip?.Parent;
+		if (!tip || !base || !blade || !blade.IsA("BasePart")) return undefined;
+		const along = tip.WorldPosition.sub(base.WorldPosition);
+		if (along.Magnitude < 0.01) return undefined;
+		const dir = along.Unit;
+		const cf = blade.CFrame;
+		const axes: Array<[Vector3, number]> = [
+			[cf.RightVector, blade.Size.X],
+			[cf.UpVector, blade.Size.Y],
+			[cf.LookVector, blade.Size.Z],
+		];
+		let best: [Vector3, number] | undefined;
+		for (const [axis, size] of axes) {
+			if (math.abs(axis.Dot(dir)) > 0.7) continue;
+			if (!best || size < best[1]) best = [axis, size];
+		}
+		return best;
+	}
+
+	bladeTip(): Vector3 | undefined {
+		return this.tipAtt?.WorldPosition;
+	}
+
+	/**
+	 * Patahin pedang. Pedang mesh pecah total (bagian disembunyiin, serpihan dibikin VFX), pedang part dipotong.
+	 * Balikin [pangkal, ujung] bilah buat serpihan.
+	 */
+	breakBlade(): [Vector3, Vector3] | undefined {
+		const tip = this.tipAtt?.WorldPosition;
+		const base = this.baseAtt?.WorldPosition;
+		if (!tip || !base) return undefined;
+		if (this.swordParts.size() > 0) {
+			for (const p of this.swordParts) p.Transparency = 1;
+			for (const fx of this.swordFx) fx.Enabled = false;
+		} else if (this.blade && this.bladeWeld) {
+			const blade = this.blade;
+			const len = blade.Size.Z * 0.35;
+			const grip = new CFrame(0, -0.25, 0);
+			blade.Size = new Vector3(blade.Size.X, blade.Size.Y, len);
+			this.bladeWeld.C0 = grip.mul(new CFrame(0, 0, -0.6 - len / 2));
+			if (this.edge && this.edgeWeld) {
+				this.edge.Size = new Vector3(this.edge.Size.X, this.edge.Size.Y, len);
+				this.edgeWeld.C0 = grip.mul(new CFrame(0, 0.13, -0.6 - len / 2));
+			}
 		}
 		if (this.trail) this.trail.Enabled = false;
+		if (this.qiTrail) this.qiTrail.Enabled = false;
 		this.trail = undefined;
-		return tip;
+		this.qiTrail = undefined;
+		this.tipAtt = undefined;
+		return [base, tip];
 	}
 
 	setVisible(v: boolean) {
@@ -264,36 +1013,196 @@ export class Actor {
 		return this.ghostParts;
 	}
 
-	update(now: number, breathe: number) {
+	update(now: number) {
 		if (!this.visible) return;
+		const dt = math.clamp(now - this.lastNow, 0, 0.1);
+		this.lastNow = now;
+		if (this.knocked) this.updateKnock(now);
+		else this.updateRoot(now, dt);
+		if (this.trail && this.trail.Enabled && now > this.trailOff) this.trail.Enabled = false;
+		if (this.qiTrail && this.qiTrail.Enabled && now > this.trailOff) this.qiTrail.Enabled = false;
+		this.updateJoints(now, dt);
+		this.updateSway(now, dt);
+		if (this.wingRig && this.wingA > 0) this.poseWings(now);
+	}
+
+	private updateRoot(now: number, dt: number) {
+		let spin = ID;
 		if (this.moving) {
-			const a = (now - this.mT0) / this.mDur;
-			this.feet = this.mFrom.Lerp(this.mTo, ease(this.mEase, a));
-			this.root.CFrame = this.feet.mul(this.lift);
+			const a = math.clamp((now - this.mT0) / this.mDur, 0, 1);
+			const e = ease(this.mEase, a);
+			this.feet = this.mFrom.Lerp(this.mTo, e);
+			if (this.mSpin !== 0 || this.mFlip !== 0) spin = CFrame.Angles(math.rad(this.mFlip * e), math.rad(this.mSpin * e), 0);
 			if (a >= 1) {
 				this.moving = false;
 				this.ghosting = false;
+				// Putaran yang gak genap 360 jadi arah hadap baru
+				if (this.mSpin % 360 !== 0) this.feet = this.mTo.mul(CFrame.Angles(0, math.rad(this.mSpin), 0));
+				spin = ID;
 			}
 		}
-		if (this.trail && this.trail.Enabled && now > this.trailOff) this.trail.Enabled = false;
+		// Kecepatan + percepatan (dihaluskan) buat lari, condong badan, dan goyang jubah
+		if (dt > 0) {
+			const pos = this.feet.Position;
+			const vel = pos.sub(this.lastPos).div(dt);
+			this.lastPos = pos;
+			const prev = this.velS;
+			this.velS = prev.Lerp(vel, 1 - math.exp(-14 * dt));
+			this.accS = this.accS.Lerp(this.velS.sub(prev).div(dt), 1 - math.exp(-10 * dt));
+		}
+		this.root.CFrame = this.feet.mul(this.lift).mul(spin);
+	}
 
-		// Pose: kalau udah sampai, cuma napas (Waist + Neck) yang di-update biar hemat
-		const a = ease(this.poseEase, (now - this.poseT0) / this.poseDur);
-		for (const [n, j] of this.joints) {
-			const breathing = n === "Waist" || n === "Neck";
-			if (this.settled && !breathing) continue;
-			let c = this.cur.get(n) ?? ID;
-			if (!this.settled) {
-				c = (this.from.get(n) ?? ID).Lerp(this.target.get(n) ?? ID, a);
-				this.cur.set(n, c);
+	private updateKnock(now: number) {
+		const t = now - this.kT0;
+		const p = this.kStart.Position.add(this.kVel.mul(t)).add(new Vector3(0, -0.5 * GRAVITY * t * t, 0));
+		this.root.CFrame = new CFrame(p).mul(this.kStart.Rotation).mul(CFrame.Angles(this.kSpin.X * t, this.kSpin.Y * t, this.kSpin.Z * t));
+		if (this.kFade === undefined) return;
+		const a = math.clamp((t - 0.12) / this.kFade, 0, 1);
+		if (a <= 0) return;
+		if (!this.fading) {
+			// Mulai luruh: simpan transparansi asli, semburkan debu emas dari badan
+			this.fading = [];
+			for (const d of this.model.GetDescendants()) {
+				if ((d.IsA("BasePart") || d.IsA("Decal")) && d.Transparency < 1 && d !== this.root) this.fading.push([d, d.Transparency]);
 			}
-			const extra = n === "Waist" ? CFrame.Angles(breathe * 0.03, 0, 0) : n === "Neck" ? CFrame.Angles(-breathe * 0.015, 0, 0) : ID;
-			j.motor.C0 = j.c0.mul(c).mul(extra);
+			const torso = (this.model.FindFirstChild("UpperTorso") as BasePart | undefined) ?? this.root;
+			const dust = new Instance("ParticleEmitter");
+			dust.Texture = TEX.glow;
+			dust.Color = new ColorSequence(GOLD, new Color3(1, 1, 1));
+			dust.LightEmission = 1;
+			dust.LightInfluence = 0;
+			dust.Size = new NumberSequence([new NumberSequenceKeypoint(0, 0.5), new NumberSequenceKeypoint(1, 0)]);
+			dust.Transparency = new NumberSequence([new NumberSequenceKeypoint(0, 0.1), new NumberSequenceKeypoint(1, 1)]);
+			dust.Lifetime = new NumberRange(0.5, 1.1);
+			dust.Speed = new NumberRange(2, 7);
+			dust.SpreadAngle = new Vector2(180, 180);
+			dust.Acceleration = new Vector3(0, 7, 0);
+			dust.Drag = 2;
+			dust.Rate = 140;
+			dust.Shape = Enum.ParticleEmitterShape.Box;
+			dust.Parent = torso;
+			this.fx.push(dust);
+			this.onEmitter?.(dust);
 		}
-		if (!this.settled && now - this.poseT0 >= this.poseDur) this.settled = true;
+		for (const [d, t0] of this.fading) d.Transparency = t0 + (1 - t0) * a;
+		if (this.highlight) this.highlight.OutlineTransparency = math.max(this.highlight.OutlineTransparency, a);
+		if (a >= 1) this.setVisible(false);
+	}
+
+	private updateJoints(now: number, dt: number) {
+		if (this.animTracks > 0) return;
+		// Lapisan hidup: makin cepat badan gerak, makin kecil (biar gak ganggu tebasan)
+		const amp = this.still ? 0 : 1 / (1 + this.energy * 0.006);
+		const t = now + this.seed;
+		const breath = math.sin(t * 1.9);
+		const n = (f: number, k: number) => math.noise(t * f, k, this.seed) * 2;
+
+		// Lari: fase langkah ikut jarak tempuh di tanah
+		const height = this.origin.PointToObjectSpace(this.feet.Position).Y;
+		const grounded = !this.knocked && height < 1.5;
+		const flatSpeed = new Vector3(this.velS.X, 0, this.velS.Z).Magnitude;
+		const dash = math.clamp((flatSpeed - 22) / 14, 0, 1);
+		const run = grounded ? math.clamp((flatSpeed - 2) / 7, 0, 1) * (1 - dash) : 0;
+		this.phase += ((math.min(flatSpeed, 20) * dt) / 5.5) * math.pi * 2;
+		const ph = this.phase;
+		const sp = math.sin(ph);
+		const cp = math.cos(ph);
+		const armSwing = this.poseArms ? 0.2 : 1;
+
+		// Condong ke arah gerak / percepatan (sumbu badan sendiri)
+		const lv = this.feet.VectorToObjectSpace(this.velS);
+		const la = this.feet.VectorToObjectSpace(this.accS);
+		const lean = this.knocked ? 0 : math.clamp(-lv.Z * 0.5 + -la.Z * 0.03, -16, 22);
+		const roll = this.knocked ? 0 : math.clamp(lv.X * 0.25 + la.X * 0.03, -14, 14);
+
+		// Siaga mantul / melayang di udara
+		const alert = !this.still && ALERT.has(this.poseName) ? 1 : 0;
+		const bounce = 0.5 + 0.5 * math.sin(t * math.pi * 2 * 1.15);
+		const airborne = !this.still && !this.knocked && height > 1.5 && flatSpeed < 6 ? 1 : 0;
+		const hover = math.sin(t * 1.6);
+
+		let energy = 0;
+		for (const j of this.joints) {
+			for (let i = 0; i < 4; i++) {
+				if (dt > 0) springStep(j.x, j.v, j.to, i, j.w, j.z, dt);
+			}
+			energy += math.abs(j.v[0]) + math.abs(j.v[1]) + math.abs(j.v[2]);
+			let rx = j.x[0];
+			let ry = j.x[1];
+			let rz = j.x[2];
+			let dy = j.x[3];
+			switch (j.name) {
+				case "Root":
+					rx += -lean - 10 * dash + n(0.3, 1.1) * 0.8 * amp;
+					ry += n(0.25, 2.3) * 1.5 * amp;
+					rz += -roll + n(0.3, 3.7) * 0.8 * amp;
+					dy += -0.13 * run * math.abs(cp) - 0.05 * alert * bounce + 0.14 * airborne * hover;
+					break;
+				case "Waist":
+					rx += breath * 1.3 * amp - 4 * run;
+					ry += n(0.3, 4.1) * 2 * amp + sp * 9 * run;
+					break;
+				case "Neck":
+					rx += -breath * 0.6 * amp + n(0.35, 5.3) * 2.5 * amp + 6 * dash;
+					ry += n(0.22, 6.7) * 4 * amp;
+					break;
+				case "RightShoulder":
+					rx += n(0.4, 7.9) * 2 * amp - sp * 32 * run * armSwing;
+					rz += breath * 0.9 * amp;
+					break;
+				case "LeftShoulder":
+					rx += n(0.4, 8.3) * 2 * amp + sp * 32 * run * armSwing;
+					rz -= breath * 0.9 * amp;
+					break;
+				case "RightElbow":
+				case "LeftElbow":
+					rx += 22 * run * armSwing;
+					break;
+				case "RightWrist":
+					rx += n(0.5, 9.7) * 3 * amp;
+					break;
+				case "RightHip":
+					rx += sp * 40 * run - 28 * dash - 4 * alert * bounce + 6 * airborne * hover;
+					break;
+				case "LeftHip":
+					rx += -sp * 40 * run - 18 * dash - 4 * alert * bounce - 4 * airborne * hover;
+					break;
+				case "RightKnee":
+					rx += -(8 + 58 * math.max(0, cp)) * run - 35 * dash - 5 * alert * bounce - 6 * airborne * hover;
+					break;
+				case "LeftKnee":
+					rx += -(8 + 58 * math.max(0, -cp)) * run - 25 * dash - 5 * alert * bounce + 4 * airborne * hover;
+					break;
+			}
+			const rot = jointCFrame(rx, ry, rz, dy);
+			if (j.motor) j.motor.C0 = j.c0.mul(rot);
+			else if (j.ac) j.ac.Transform = rot;
+		}
+		this.energy = energy;
+	}
+
+	private updateSway(now: number, dt: number) {
+		if (dt <= 0) return;
+		for (const s of this.sways) {
+			const pos = s.part.Position;
+			const vel = pos.sub(s.lastPos).div(dt);
+			const acc = vel.sub(s.lastVel).div(dt);
+			s.lastPos = pos;
+			s.lastVel = vel;
+			// Percepatan di sumbu bagian badan itu sendiri + gravitasi (biar ujungnya selalu "jatuh" ke bawah)
+			const rel = s.part.CFrame.VectorToObjectSpace(acc.add(new Vector3(0, GRAVITY * 0.3, 0)));
+			s.to[0] = math.clamp(rel.Z * s.k, -s.max, s.max);
+			s.to[1] = math.clamp(-rel.X * s.k, -s.max, s.max);
+			springStep(s.x, s.v, s.to, 0, 7, 0.32, dt);
+			springStep(s.x, s.v, s.to, 1, 7, 0.32, dt);
+			const f = this.still ? 0 : s.flutter * math.noise(now * 1.7, this.seed, s.k * 10);
+			s.apply(math.clamp(s.x[0] + f, -s.max, s.max), math.clamp(s.x[1] + f * 0.6, -s.max, s.max));
+		}
 	}
 
 	destroy() {
+		this.wingRig?.folder.Destroy();
 		this.model.Destroy();
 	}
 }

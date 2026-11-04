@@ -24,6 +24,8 @@ function frame(parent: Instance, props: Partial<WritableInstanceProperties<Frame
 
 function label(parent: Instance, props: Partial<WritableInstanceProperties<TextLabel>>) {
 	const l = new Instance("TextLabel");
+	// Default Roblox "Label" jangan sampai nongol
+	l.Text = "";
 	l.BackgroundTransparency = 1;
 	l.TextColor3 = new Color3(1, 1, 1);
 	l.TextScaled = true;
@@ -34,12 +36,43 @@ function label(parent: Instance, props: Partial<WritableInstanceProperties<TextL
 	return l;
 }
 
-function stroke(parent: GuiObject, thickness = 1.5) {
+function stroke(parent: TextLabel, thickness = 1.5) {
 	const s = new Instance("UIStroke");
 	s.Thickness = thickness;
-	s.Transparency = 0.4;
+	// UIStroke gak ikut TextTransparency: tanpa ini garis tepi teks nyangkut di layar walau teksnya udah hilang
+	const sync = () => (s.Transparency = 0.4 + 0.6 * parent.TextTransparency);
+	sync();
+	parent.GetPropertyChangedSignal("TextTransparency").Connect(sync);
 	s.Parent = parent;
 	return s;
+}
+
+/** Cap segel merah (印章) ala lukisan China: kotak merah, huruf putih, muncul kayak dicap. */
+function seal(parent: Instance, position: UDim2, size: number, zindex: number): [Frame, TextLabel, UIScale] {
+	const f = frame(parent, {
+		BackgroundColor3: SEAL,
+		BackgroundTransparency: 1,
+		Size: UDim2.fromScale(size, size),
+		SizeConstraint: Enum.SizeConstraint.RelativeYY,
+		Position: position,
+		AnchorPoint: new Vector2(0.5, 0.5),
+		ZIndex: zindex,
+	});
+	const corner = new Instance("UICorner");
+	corner.CornerRadius = new UDim(0.1, 0);
+	corner.Parent = f;
+	const text = label(f, {
+		Size: UDim2.fromScale(0.86, 0.86),
+		Position: UDim2.fromScale(0.5, 0.5),
+		AnchorPoint: new Vector2(0.5, 0.5),
+		TextColor3: Color3.fromRGB(250, 236, 222),
+		FontFace: TITLE,
+		LineHeight: 0.9,
+		ZIndex: zindex,
+	});
+	const scale = new Instance("UIScale");
+	scale.Parent = f;
+	return [f, text, scale];
 }
 
 /** "BAI WUJI" jadi "B A I   W U J I" biar kerasa judul film. */
@@ -55,12 +88,17 @@ export class CutsceneUI {
 	private bottom: Frame;
 	private fader: Frame;
 	private subWho: TextLabel;
+	private subZh: TextLabel;
 	private subText: TextLabel;
 	private subToken = 0;
 	private card: Frame;
 	private cardParts: TextLabel[];
 	private cardStripe: Frame;
+	private cardSeal: [Frame, TextLabel, UIScale];
+	private titleSeal: [Frame, TextLabel, UIScale];
 	private title: TextLabel;
+	private titleCn: TextLabel;
+	private titleCnScale: UIScale;
 	private titleSub: TextLabel;
 	private lines: Frame[] = [];
 	private linesUntil = 0;
@@ -117,6 +155,17 @@ export class CutsceneUI {
 		const subSize = new Instance("UITextSizeConstraint");
 		subSize.MaxTextSize = 30;
 		subSize.Parent = this.subText;
+		// Baris Mandarin (yang diucapin), di atas terjemahan Inggris
+		this.subZh = label(gui, {
+			Size: UDim2.fromScale(0.6, 0.03),
+			Position: UDim2.fromScale(0.5, 0.931),
+			AnchorPoint: new Vector2(0.5, 0.5),
+			TextColor3: Color3.fromRGB(246, 236, 212),
+			ZIndex: 6,
+		});
+		const zhSize = new Instance("UITextSizeConstraint");
+		zhSize.MaxTextSize = 28;
+		zhSize.Parent = this.subZh;
 
 		// Kartu nama tokoh ala donghua: huruf Han vertikal, garis segel merah, nama Inggris, julukan
 		this.card = frame(gui, { Size: UDim2.fromScale(0.4, 0.34), Position: UDim2.fromScale(0.06, 0.5), AnchorPoint: new Vector2(0, 0.5), BackgroundTransparency: 1, ZIndex: 4 });
@@ -127,8 +176,14 @@ export class CutsceneUI {
 		stroke(cn, 2);
 		stroke(name);
 		this.cardParts = [cn, name, epithet];
+		this.cardSeal = seal(this.card, UDim2.fromScale(0.33, 0.8), 0.15, 4);
 
 		this.title = label(gui, { Size: UDim2.fromScale(0.8, 0.09), Position: UDim2.fromScale(0.5, 0.46), AnchorPoint: new Vector2(0.5, 0.5), FontFace: TITLE, TextColor3: GOLD, ZIndex: 8 });
+		this.titleCn = label(gui, { Size: UDim2.fromScale(0.5, 0.15), Position: UDim2.fromScale(0.5, 0.33), AnchorPoint: new Vector2(0.5, 0.5), FontFace: TITLE, TextColor3: Color3.fromRGB(250, 240, 220), ZIndex: 8 });
+		stroke(this.titleCn, 2);
+		this.titleCnScale = new Instance("UIScale");
+		this.titleCnScale.Parent = this.titleCn;
+		this.titleSeal = seal(gui, UDim2.fromScale(0.71, 0.37), 0.075, 8);
 		this.titleSub = label(gui, { Size: UDim2.fromScale(0.5, 0.035), Position: UDim2.fromScale(0.5, 0.54), AnchorPoint: new Vector2(0.5, 0.5), FontFace: SERIF_ITALIC, ZIndex: 8 });
 
 		this.fader = frame(gui, { Size: UDim2.fromScale(1, 1), BackgroundTransparency: 1, ZIndex: 7 });
@@ -188,15 +243,23 @@ export class CutsceneUI {
 		TweenService.Create(this.bottom, info, { Size: UDim2.fromScale(1, show ? BAR : 0) }).Play();
 	}
 
-	subtitle(who: string | undefined, text: string, dur: number) {
+	subtitle(who: string | undefined, text: string, dur: number, zh?: string) {
 		const token = ++this.subToken;
 		const shown = text.gsub("{player}", Players.LocalPlayer.DisplayName)[0];
+		const two = zh !== undefined && zh !== "";
 		this.subWho.Text = who !== undefined ? spaced(who.upper()) : "";
+		this.subZh.Text = two ? zh : "";
 		this.subText.Text = shown;
 		this.subText.MaxVisibleGraphemes = 0;
+		// Dua bahasa: nama, Mandarin, Inggris (lebih kecil). Satu bahasa: layout lama
+		this.subWho.Position = UDim2.fromScale(0.5, two ? 0.903 : 0.905);
+		this.subWho.Size = UDim2.fromScale(0.6, two ? 0.022 : 0.026);
+		this.subText.Position = UDim2.fromScale(0.5, two ? 0.963 : 0.945);
+		this.subText.Size = UDim2.fromScale(0.72, two ? 0.027 : 0.036);
 		const graphemes = (utf8.len(shown)[0] as number | undefined) ?? shown.size();
 		this.tw.add(0.15, (a) => {
 			this.subWho.TextTransparency = 1 - a;
+			this.subZh.TextTransparency = 1 - a;
 			this.subText.TextTransparency = 1 - a;
 		});
 		// Efek ketik: cepat, maksimal 1 detik
@@ -208,6 +271,7 @@ export class CutsceneUI {
 			this.tw.add(0.25, (a) => {
 				if (token !== this.subToken) return;
 				this.subWho.TextTransparency = a;
+				this.subZh.TextTransparency = a;
 				this.subText.TextTransparency = a;
 			});
 		});
@@ -220,6 +284,8 @@ export class CutsceneUI {
 		cnLabel.Text = chars.join("\n");
 		nameLabel.Text = spaced(name);
 		epithetLabel.Text = epithet ?? "";
+		const [sealFrame, sealText, sealScale] = this.cardSeal;
+		sealText.Text = chars[0] ?? "";
 		const fadeTo = (a: number) => {
 			for (const l of this.cardParts) l.TextTransparency = a;
 			this.cardStripe.BackgroundTransparency = a;
@@ -229,20 +295,57 @@ export class CutsceneUI {
 			this.card.Position = UDim2.fromScale(0.02 + 0.04 * e, 0.5);
 			fadeTo(1 - e);
 		});
-		this.tw.after(dur, () => this.tw.add(0.6, (a) => fadeTo(a)));
+		if (chars.size() > 0) this.tw.after(0.55, () => this.stamp(sealFrame, sealText, sealScale));
+		this.tw.after(dur, () =>
+			this.tw.add(0.6, (a) => {
+				fadeTo(a);
+				if (chars.size() > 0) {
+					sealFrame.BackgroundTransparency = math.max(sealFrame.BackgroundTransparency, a);
+					sealText.TextTransparency = math.max(sealText.TextTransparency, a);
+				}
+			}),
+		);
 	}
 
-	showTitle(text: string, sub: string | undefined, dur: number) {
+	/** Animasi cap: jatuh dari besar ke ukuran asli dengan cepat, kayak stempel ditekan. */
+	private stamp(f: Frame, text: TextLabel, scale: UIScale) {
+		this.tw.add(0.16, (a) => {
+			const e = a * a;
+			scale.Scale = 1.8 - 0.8 * e;
+			f.BackgroundTransparency = 1 - e;
+			text.TextTransparency = 1 - e;
+		});
+	}
+
+	showTitle(text: string, sub: string | undefined, dur: number, cn?: string) {
 		this.title.Text = spaced(text);
 		this.titleSub.Text = sub ?? "";
+		this.titleCn.Text = cn ?? "";
+		const [sealFrame, sealText, sealScale] = this.titleSeal;
+		// Segel 2 huruf pertama, ditumpuk vertikal (逆天)
+		const chars: string[] = [];
+		for (const [, code] of utf8.codes(cn ?? "")) chars.push(utf8.char(code));
+		sealText.Text = chars.size() >= 2 ? `${chars[0]}\n${chars[1]}` : chars[0] ?? "";
+		if (chars.size() > 0) this.tw.after(1.1, () => this.stamp(sealFrame, sealText, sealScale));
 		this.tw.add(1, (a) => {
 			this.title.TextTransparency = 1 - a;
 			this.titleSub.TextTransparency = 1 - a;
+		});
+		// Huruf Han muncul duluan, turun pelan dari agak besar
+		this.tw.add(1.6, (a) => {
+			const e = 1 - (1 - a) ** 3;
+			this.titleCn.TextTransparency = 1 - math.min(a * 1.6, 1);
+			this.titleCnScale.Scale = 1.15 - 0.15 * e;
 		});
 		this.tw.after(dur - 1, () =>
 			this.tw.add(1, (a) => {
 				this.title.TextTransparency = a;
 				this.titleSub.TextTransparency = a;
+				this.titleCn.TextTransparency = a;
+				if (chars.size() > 0) {
+					sealFrame.BackgroundTransparency = math.max(sealFrame.BackgroundTransparency, a);
+					sealText.TextTransparency = math.max(sealText.TextTransparency, a);
+				}
 			}),
 		);
 	}

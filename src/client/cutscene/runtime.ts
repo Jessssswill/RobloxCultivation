@@ -1,8 +1,9 @@
 // Pemutar satu cutscene: jam timeline (slow-mo + hitstop), kamera spline, aktor, event, VFX, UI, suara.
 // Satu RenderStep per cutscene, semua instance dibikin lokal dan dihapus pas selesai atau di-skip.
+// Suara Mandarin pakai AudioTextToSpeech Roblox (gak perlu upload), dimuat satu-satu di belakang layar.
 
-import { Players, RunService, SoundService, StarterGui, TweenService, Workspace } from "@rbxts/services";
-import { MUSIC, SFX } from "shared/cutscene/audio";
+import { ContentProvider, Players, ReplicatedStorage, RunService, SoundService, StarterGui, TweenService, Workspace } from "@rbxts/services";
+import { MUSIC, SFX, VOICES } from "shared/cutscene/audio";
 import { ease } from "shared/cutscene/ease";
 import { CamKey, CutEvent, CutsceneDef } from "shared/cutscene/types";
 import { Actor } from "./actors";
@@ -21,6 +22,12 @@ const CORE_TYPES = [
 	Enum.CoreGuiType.EmotesMenu,
 ];
 const WHITE = new Color3(1, 1, 1);
+const QI = Color3.fromRGB(190, 225, 255);
+/** Maksimal nunggu rig + aset kebuka sebelum mulai (layar hitam). */
+const LOAD_WAIT = 4;
+
+type SubEvent = Extract<CutEvent, { kind: "sub" }>;
+type VoiceEvent = Extract<CutEvent, { kind: "voice" }>;
 
 interface Controls {
 	Enable(): void;
@@ -54,6 +61,18 @@ function byTime<T extends { t: number }>(list: readonly T[]): T[] {
 	return indexed.map((x) => x.item);
 }
 
+/** Set properti satu-satu pakai pcall: API Audio masih baru, nama properti bisa berubah. */
+function setProps(inst: Instance, props: Record<string, unknown>) {
+	for (const [k, v] of pairs(props)) pcall(() => ((inst as unknown as Record<string, unknown>)[k] = v));
+}
+
+function wire(from: Instance, to: Instance) {
+	const w = new Instance("Wire");
+	w.SourceInstance = from;
+	w.TargetInstance = to;
+	w.Parent = to;
+}
+
 export class CutsceneRun {
 	private q: Quality;
 	private tw = new Tweens();
@@ -72,13 +91,26 @@ export class CutsceneRun {
 	private ui: CutsceneUI;
 	private post?: Post;
 	private music?: Sound;
+	private musicVol = 0.5;
+	private duckToken = 0;
 	private sounds = new Array<Sound>();
+	/** SFX loop yang lagi jalan, per nama (biar volumenya bisa diatur event berikutnya). */
+	private loops = new Map<string, Sound>();
+	private voiceFolder?: Folder;
+	private voiceLines = new Map<CutEvent, AudioTextToSpeech>();
 	private hiddenGuis = new Array<ScreenGui>();
 	private coreState = new Array<[Enum.CoreGuiType, boolean]>();
 	private controls?: Controls;
 	private savedFov = 70;
 	private ended = false;
 	private started = false;
+	private bound = false;
+	private beganAt = 0;
+	private slowTime = 0;
+	private degraded = false;
+	private propVals = new Map<string, number>();
+	private setEmitters = new Set<ParticleEmitter>();
+	private frozen = false;
 
 	constructor(private def: CutsceneDef, private onDone: (skipped: boolean) => void) {
 		this.q = detectQuality();
@@ -95,8 +127,11 @@ export class CutsceneRun {
 	start() {
 		if (this.started) return;
 		this.started = true;
-		const def = this.def;
 		const player = Players.LocalPlayer;
+
+		// Layar hitam dulu selama rig, suara, dan tekstur dimuat
+		this.ui.fadeReal(1, 0.25);
+		this.savedFov = Workspace.CurrentCamera!.FieldOfView;
 
 		// Sembunyiin HUD game dan CoreGui, kunci kontrol
 		for (const gui of player.WaitForChild("PlayerGui").GetChildren()) {
@@ -113,26 +148,176 @@ export class CutsceneRun {
 		this.controls = playerControls();
 		this.controls?.Disable();
 
-		// Set dan aktor
-		def.build?.(this.root, this.q.low);
+		this.loadVoices();
+		task.spawn(() => {
+			this.waitForAssets();
+			if (!this.ended) this.begin();
+		});
+	}
+
+	/** Tunggu rig dari server + preload tekstur/suara, maksimal LOAD_WAIT detik. */
+	private waitForAssets() {
+		const t0 = os.clock();
+		const rigs = ReplicatedStorage.WaitForChild("CutsceneRigs", LOAD_WAIT);
+		const needed = new Set<string>();
+		for (const a of this.def.actors) {
+			if (a.look === "template" && a.template !== undefined) needed.add(a.template);
+			if (a.sword !== undefined) needed.add(a.sword);
+		}
+		while (os.clock() - t0 < LOAD_WAIT) {
+			let missing = false;
+			for (const name of needed) if (!rigs?.FindFirstChild(name)) missing = true;
+			if (!missing) break;
+			task.wait(0.2);
+		}
+		const content = new Array<Instance | string>();
+		for (const name of needed) {
+			const rig = rigs?.FindFirstChild(name);
+			if (rig) content.push(rig);
+		}
+		for (const e of this.events) {
+			if (e.kind === "music" && (MUSIC[e.name] ?? "") !== "") content.push(MUSIC[e.name]);
+			if (e.kind === "sfx" && (SFX[e.name] ?? "") !== "") content.push(SFX[e.name]);
+		}
+		let done = false;
+		task.spawn(() => {
+			pcall(() => ContentProvider.PreloadAsync(content as Instance[]));
+			done = true;
+		});
+		while (!done && os.clock() - t0 < LOAD_WAIT) task.wait(0.1);
+	}
+
+	private begin() {
+		const def = this.def;
+		def.build?.(this.root, this.q.tier);
 		this.root.Parent = Workspace;
+		// Emitter set (debu, partikel qi melayang) ikut slow-mo juga
+		for (const d of this.root.GetDescendants()) {
+			if (!d.IsA("ParticleEmitter")) continue;
+			this.ctx.emitters.push(d);
+			this.setEmitters.add(d);
+		}
+		if (def.props) {
+			for (const [name, p] of pairs(def.props)) {
+				this.propVals.set(name, p.init);
+				p.set(this.root, p.init);
+			}
+		}
 		for (const a of def.actors) {
-			const actor = Actor.create(a, this.root, this.origin);
-			if (actor) this.actors.set(a.id, actor);
+			const actor = Actor.create(a, this.root, this.origin, this.q);
+			if (!actor) continue;
+			this.actors.set(a.id, actor);
+			for (const e of actor.fx) this.ctx.emitters.push(e);
+			actor.onEmitter = (e) => {
+				e.TimeScale = this.ctx.rate;
+				this.ctx.emitters.push(e);
+			};
 		}
 
 		this.post = new Post(def.look, this.q.dof);
-		const cam = Workspace.CurrentCamera!;
-		this.savedFov = cam.FieldOfView;
-		cam.CameraType = Enum.CameraType.Scriptable;
+		Workspace.CurrentCamera!.CameraType = Enum.CameraType.Scriptable;
 		this.ui.letterbox(true);
 
 		let last = os.clock();
+		this.beganAt = last;
+		this.bound = true;
 		RunService.BindToRenderStep(RENDER_NAME, Enum.RenderPriority.Camera.Value + 1, () => {
 			const clock = os.clock();
 			const dt = math.min(clock - last, 0.1);
 			last = clock;
 			this.step(dt, clock);
+		});
+	}
+
+	/** Bikin rantai suara per profil (pitch, echo, reverb, volume) lalu muat kalimat Mandarin satu-satu. */
+	private loadVoices() {
+		const lines = this.events.filter(
+			(e): e is SubEvent | VoiceEvent => (e.kind === "sub" && e.zh !== undefined && e.voice !== undefined) || e.kind === "voice",
+		);
+		if (lines.size() === 0) return;
+		const folder = new Instance("Folder");
+		folder.Name = "CutsceneVoice";
+		folder.Parent = SoundService;
+		this.voiceFolder = folder;
+		const out = new Instance("AudioDeviceOutput");
+		out.Parent = folder;
+		const chains = new Map<string, Instance>();
+		const chainFor = (name: string) => {
+			const existing = chains.get(name);
+			if (existing) return existing;
+			const v = VOICES[name];
+			const pitch = new Instance("AudioPitchShifter");
+			setProps(pitch, { Pitch: v.pitch });
+			pitch.Parent = folder;
+			let tail: Instance = pitch;
+			if (v.echo !== undefined && v.echo > 0) {
+				const echo = new Instance("AudioEcho");
+				setProps(echo, { DelayTime: 0.28, Feedback: 0.25, WetLevel: -18 + 12 * v.echo, DryLevel: 0 });
+				echo.Parent = folder;
+				wire(tail, echo);
+				tail = echo;
+			}
+			if (v.reverb > 0) {
+				const reverb = new Instance("AudioReverb");
+				setProps(reverb, { DecayTime: 1 + 2.5 * v.reverb, WetLevel: -16 + 12 * v.reverb, DryLevel: 0, Density: 1, Diffusion: 1 });
+				reverb.Parent = folder;
+				wire(tail, reverb);
+				tail = reverb;
+			}
+			const fader = new Instance("AudioFader");
+			setProps(fader, { Volume: v.volume });
+			fader.Parent = folder;
+			wire(tail, fader);
+			wire(fader, out);
+			chains.set(name, pitch);
+			return pitch;
+		};
+		task.spawn(() => {
+			// Satu-satu: TTS Roblox gagal kalau dimuat barengan (dicek 4 Nov)
+			for (const e of lines) {
+				if (this.ended) return;
+				const zh = e.zh;
+				const name = e.voice;
+				if (zh === undefined || name === undefined || VOICES[name] === undefined) continue;
+				const v = VOICES[name];
+				const tts = new Instance("AudioTextToSpeech");
+				tts.AutoLocalize = false;
+				tts.VoiceId = v.voiceId;
+				tts.Speed = v.speed;
+				tts.Text = zh;
+				tts.Parent = folder;
+				wire(tts, chainFor(name));
+				let ok = false;
+				for (let attempt = 0; attempt < 2 && !ok && !this.ended; attempt++) {
+					const [success, status] = pcall(() => tts.LoadAsync());
+					ok = success && status === Enum.AssetFetchStatus.Success;
+					if (!ok) task.wait(1);
+				}
+				if (ok) this.voiceLines.set(e, tts);
+				else tts.Destroy();
+			}
+		});
+	}
+
+	/** Putar suara kalimat ini kalau udah kemuat. Balikin durasinya (0 kalau gak ada). */
+	private speak(e: CutEvent) {
+		const tts = this.voiceLines.get(e);
+		if (!tts) return 0;
+		tts.TimePosition = 0;
+		tts.Play();
+		this.duck(tts.TimeLength + 0.3);
+		return tts.TimeLength;
+	}
+
+	/** Kecilin musik selama ada yang ngomong (biar suara gak tabrakan sama lagu). */
+	private duck(seconds: number) {
+		const m = this.music;
+		if (!m || m.Parent === undefined) return;
+		this.duckToken += 1;
+		const token = this.duckToken;
+		TweenService.Create(m, new TweenInfo(0.25), { Volume: this.musicVol * 0.35 }).Play();
+		task.delay(seconds, () => {
+			if (token === this.duckToken && this.music === m) TweenService.Create(m, new TweenInfo(0.8), { Volume: this.musicVol }).Play();
 		});
 	}
 
@@ -149,9 +334,8 @@ export class CutsceneRun {
 		}
 
 		this.tw.update(now);
-		const breathe = math.sin(now * 1.8);
 		for (const [, actor] of this.actors) {
-			actor.update(now, breathe);
+			actor.update(now);
 			if (actor.ghosting && actor.visible && this.q.ghosts > 0 && actor.liveGhosts < this.q.ghosts && now - actor.lastGhost >= 0.05) {
 				actor.lastGhost = now;
 				vfx.ghost(this.ctx, actor);
@@ -160,14 +344,28 @@ export class CutsceneRun {
 		this.updateCamera(now, clock);
 		this.post?.update();
 		this.ui.update(dt);
+		this.guardFps(dt, clock);
 
 		if (now >= this.def.length) this.finish(false);
+	}
+
+	/** Pengaman: kalau FPS di bawah ~25 terus-terusan, turunin efek sekali (partikel, bayangan, DOF). */
+	private guardFps(dt: number, clock: number) {
+		if (this.degraded || this.q.tier === 0 || clock - this.beganAt < 2) return;
+		this.slowTime = math.max(0, this.slowTime + (dt > 1 / 25 ? dt : -dt * 0.5));
+		if (this.slowTime < 1.5) return;
+		this.degraded = true;
+		this.q.particles *= 0.5;
+		this.q.ghosts = math.min(this.q.ghosts, 3);
+		this.q.dof = false;
+		this.post?.disableDof();
+		for (const e of this.ctx.emitters) if (e.Parent !== undefined && e.Rate > 0) e.Rate *= 0.4;
 	}
 
 	private setParticleRate(rate: number) {
 		this.ctx.rate = rate;
 		const alive = this.ctx.emitters.filter((e) => e.Parent !== undefined);
-		for (const e of alive) e.TimeScale = rate;
+		for (const e of alive) e.TimeScale = this.frozen && this.setEmitters.has(e) ? 0 : rate;
 		this.ctx.emitters = alive;
 	}
 
@@ -251,17 +449,25 @@ export class CutsceneRun {
 	private fire(e: CutEvent) {
 		const now = this.now;
 		switch (e.kind) {
-			case "sub":
-				this.ui.subtitle(e.who, e.text, e.dur);
+			case "sub": {
+				const spoken = this.speak(e);
+				this.ui.subtitle(e.who, e.text, math.max(e.dur, spoken + 0.4), e.zh);
+				break;
+			}
+			case "voice":
+				this.speak(e);
 				break;
 			case "card":
 				this.ui.nameCard(e.name, e.cn, e.epithet, e.dur);
 				break;
 			case "title":
-				this.ui.showTitle(e.text, e.sub, e.dur);
+				this.ui.showTitle(e.text, e.sub, e.dur, e.cn);
 				break;
 			case "fade":
 				this.ui.fade(e.to, e.dur, e.color ?? new Color3(0, 0, 0));
+				break;
+			case "grade":
+				this.post?.gradeTo(e.to, e.dur, this.tw);
 				break;
 			case "shake":
 				this.shakes.push({ t0: os.clock(), dur: e.dur, mag: e.mag });
@@ -273,7 +479,7 @@ export class CutsceneRun {
 				this.ui.speedLines(0.25 + 0.1 * s);
 				this.shakes.push({ t0: os.clock(), dur: 0.35 + 0.1 * s, mag: 0.5 * s });
 				const id = SFX.impact;
-				if (id !== "") this.sound(id, 0.8, false);
+				if (id !== "") this.sound(id, math.min(0.35 + 0.2 * s, 0.8), false).PlaybackSpeed = 1.1 - 0.08 * s;
 				break;
 			}
 			case "speed":
@@ -283,8 +489,42 @@ export class CutsceneRun {
 				this.ui.speedLines(e.dur);
 				break;
 			case "move":
-				this.actors.get(e.actor)?.moveTo(this.origin.mul(e.to), e.dur, e.ease, now, e.ghost === true);
+				this.actors.get(e.actor)?.moveTo(this.origin.mul(e.to), e.dur, e.ease, now, e.ghost === true, e.spin ?? 0, e.flip ?? 0);
 				break;
+			case "knock":
+				this.actors.get(e.actor)?.knock(this.origin.VectorToWorldSpace(e.dir), e.power ?? 30, e.fade, now);
+				break;
+			case "wings": {
+				const actor = this.actors.get(e.actor);
+				const on = e.on;
+				if (actor) this.tw.add(on ? 0.3 : 0.6, (k) => actor.setWings(on ? k : 1 - k));
+				break;
+			}
+			case "pinch": {
+				const who = this.actors.get(e.actor);
+				const sword = this.actors.get(e.target);
+				const tip = sword?.bladeTip();
+				if (who && sword && tip) who.pinchHand(tip, sword.bladeFlat());
+				break;
+			}
+			case "closeup":
+				this.actors.get(e.actor)?.setCloseup(e.on);
+				break;
+			case "charge": {
+				const actor = this.actors.get(e.actor);
+				if (actor) vfx.charge(this.ctx, () => actor.bladeTip(), e.dur, e.color ?? QI, e.scale ?? 1);
+				break;
+			}
+			case "glint": {
+				const tip = this.actors.get(e.actor)?.bladeTip();
+				if (tip) vfx.glint(this.ctx, tip, QI);
+				break;
+			}
+			case "still": {
+				const actor = this.actors.get(e.actor);
+				if (actor) actor.still = e.on;
+				break;
+			}
 			case "pose":
 				this.actors.get(e.actor)?.setPose(e.pose, e.dur, e.ease, now);
 				break;
@@ -297,12 +537,33 @@ export class CutsceneRun {
 			case "hide":
 				this.actors.get(e.actor)?.setVisible(false);
 				break;
+			case "aura":
+				this.actors.get(e.actor)?.setAura(e.on);
+				break;
+			case "prop": {
+				const p = this.def.props?.[e.name];
+				if (!p) break;
+				const from = this.propVals.get(e.name) ?? p.init;
+				const name = e.name;
+				const to = e.to;
+				const curve = e.ease;
+				this.tw.add(e.dur, (k) => {
+					const value = from + (to - from) * ease(curve, k);
+					this.propVals.set(name, value);
+					p.set(this.root, value);
+				});
+				break;
+			}
+			case "freeze":
+				this.frozen = e.on;
+				this.setParticleRate(this.ctx.rate);
+				break;
 			case "break": {
-				const tip = this.actors.get(e.actor)?.breakBlade();
-				if (tip) {
-					const rel = this.origin.PointToObjectSpace(tip);
-					vfx.debris(this.ctx, rel, 0.5, Color3.fromRGB(215, 220, 228), 10);
-					vfx.burst(this.ctx, rel, Color3.fromRGB(190, 225, 255), 1);
+				const blade = this.actors.get(e.actor)?.breakBlade();
+				if (blade) {
+					const [base, tip] = blade;
+					vfx.swordShatter(this.ctx, base, tip, QI);
+					vfx.burst(this.ctx, this.origin.PointToObjectSpace(tip), QI, 1);
 				}
 				break;
 			}
@@ -310,22 +571,42 @@ export class CutsceneRun {
 				this.fireVfx(e);
 				break;
 			case "sfx": {
+				const running = this.loops.get(e.name);
+				if (running && running.Parent !== undefined) {
+					TweenService.Create(running, new TweenInfo(e.fade ?? 0.5), { Volume: e.volume ?? 0.8 }).Play();
+					break;
+				}
 				const id = SFX[e.name] ?? "";
-				if (id !== "") this.sound(id, e.volume ?? 0.8, false);
+				if (id !== "") {
+					const s = this.sound(id, e.volume ?? 0.8, e.loop === true);
+					if (e.pitch !== undefined) s.PlaybackSpeed = e.pitch;
+					if (e.loop === true) this.loops.set(e.name, s);
+				}
 				break;
 			}
 			case "music": {
 				const id = MUSIC[e.name] ?? "";
 				const fade = e.fade ?? 1.5;
 				const old = this.music;
-				if (old) {
+				if (old && old.Parent !== undefined) {
 					TweenService.Create(old, new TweenInfo(fade), { Volume: 0 }).Play();
 					task.delay(fade, () => old.Destroy());
 				}
 				this.music = undefined;
+				this.duckToken += 1;
 				if (id !== "") {
-					const s = this.sound(id, 0, true);
-					TweenService.Create(s, new TweenInfo(fade), { Volume: e.volume ?? 0.5 }).Play();
+					// Gak di-loop: tiap lagu dipotong pas di bagian yang cocok sama adegan (lihat `from`)
+					const s = this.sound(id, 0, false);
+					const from = e.from ?? 0;
+					if (from > 0) {
+						s.TimePosition = from;
+						if (!s.IsLoaded) {
+							const asked = os.clock();
+							s.Loaded.Once(() => (s.TimePosition = from + (os.clock() - asked)));
+						}
+					}
+					this.musicVol = e.volume ?? 0.5;
+					TweenService.Create(s, new TweenInfo(fade), { Volume: this.musicVol }).Play();
 					this.music = s;
 				}
 				break;
@@ -337,13 +618,40 @@ export class CutsceneRun {
 		const color = e.color ?? WHITE;
 		switch (e.name) {
 			case "slash":
-				vfx.slash(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.45);
+				vfx.slash(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.45, e.style === "ink");
+				break;
+			case "wave":
+				vfx.wave(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.5, e.style === "ink");
 				break;
 			case "burst":
 				vfx.burst(this.ctx, e.at, color, e.scale ?? 1);
 				break;
 			case "ring":
 				vfx.ring(this.ctx, e.at, e.scale ?? 20, color, e.normal);
+				break;
+			case "lightning":
+				vfx.lightning(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1);
+				break;
+			case "cracks":
+				vfx.cracks(this.ctx, e.at, e.scale ?? 1, e.color, e.life ?? 1.8);
+				break;
+			case "streak":
+				vfx.streak(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.3);
+				break;
+			case "motes":
+				vfx.motes(this.ctx, e.at, e.scale ?? 1, color, e.life ?? 6);
+				break;
+			case "cleave":
+				vfx.cleave(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.2, e.life ?? 1);
+				break;
+			case "spaceCrack":
+				vfx.spaceCrack(this.ctx, e.at, e.scale ?? 1, color, e.stages ?? [], e.shatter, e.life ?? 3);
+				break;
+			case "rift":
+				vfx.rift(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.life ?? 1.6);
+				break;
+			case "shard":
+				vfx.shard(this.ctx, e.at, color, e.life ?? 10);
 				break;
 			case "fall":
 				vfx.fall(this.ctx, e.at, e.via ?? e.at.Lerp(e.to ?? e.at, 0.5), e.to ?? e.at, e.dur ?? 3, color);
@@ -373,7 +681,8 @@ export class CutsceneRun {
 	}
 
 	private close(skipped: boolean) {
-		RunService.UnbindFromRenderStep(RENDER_NAME);
+		if (this.bound) RunService.UnbindFromRenderStep(RENDER_NAME);
+		this.bound = false;
 		this.tw.clear();
 		for (const [, actor] of this.actors) actor.destroy();
 		this.actors.clear();
@@ -381,6 +690,9 @@ export class CutsceneRun {
 		this.post?.destroy();
 		for (const s of this.sounds) s.Destroy();
 		this.sounds.clear();
+		this.loops.clear();
+		this.voiceFolder?.Destroy();
+		this.voiceLines.clear();
 
 		const cam = Workspace.CurrentCamera!;
 		const hum = Players.LocalPlayer.Character?.FindFirstChildOfClass("Humanoid");
