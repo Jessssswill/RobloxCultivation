@@ -485,11 +485,13 @@ local function findJoints(char)
 	return out
 end
 
--- walking = moving on the ground. Uses velocity (not MoveDirection) so it also works for other players' characters.
-local function isWalking(root, hum)
-	if not (root and hum) or hum.FloorMaterial == Enum.Material.Air then return false end
+-- walking = the character is moving (running, or jumping/falling: the legs then keep the Animator's jump pose).
+-- Reads the replicated velocity only, not MoveDirection or FloorMaterial: those are only valid for your own character,
+-- so other players would see an attacker's legs stuck in the standing stance while they walk.
+local function isWalking(root)
+	if not root then return false end
 	local v = root.AssemblyLinearVelocity
-	return v.X * v.X + v.Z * v.Z > 2.5 * 2.5
+	return v.X * v.X + v.Z * v.Z > 2.5 * 2.5 or math.abs(v.Y) > 8
 end
 
 local function smooth(w)
@@ -510,9 +512,8 @@ function SwordCombo.Play(char, index, hooks, styleName)
 	for short, m in pairs(joints) do from[short] = m.Transform end
 	local planted = clip.plant or false
 	local root = char:FindFirstChild("HumanoidRootPart")
-	local hum = char:FindFirstChildOfClass("Humanoid")
 	-- legW: 1 = legs follow the clip (standing), 0 = legs keep walking. Carried over from the previous hit so a chain never pops.
-	local st = { t = 0, freeze = 0, done = false, legW = prev and prev.legW or ((planted or not isWalking(root, hum)) and 1 or 0) }
+	local st = { t = 0, freeze = 0, done = false, legW = prev and prev.legW or ((planted or not isWalking(root)) and 1 or 0) }
 	-- chained hit: blend straight from the previous follow-through into this wind-up instead of passing through the ready
 	-- pose, so the four cuts read as one flowing sword form
 	local fadeInTime = prev and math.max(FADE_IN, clip.keys[2][1] * 0.85) or FADE_IN
@@ -532,7 +533,8 @@ function SwordCombo.Play(char, index, hooks, styleName)
 	function st.hitStop(sec) st.freeze = math.max(st.freeze, sec) end
 	conn = RunService.PreSimulation:Connect(function(dt)
 		if not char.Parent then st.stop() return end
-		local realDt = math.min(dt, 1 / 20)
+		-- only clamp real hitches: a phone at 15-20 fps must still play the combo at full speed (in sync with the server)
+		local realDt = math.min(dt, 0.1)
 		dt = realDt * (workspace:GetAttribute("SwordComboTimeScale") or 1)
 		if st.freeze > 0 then
 			st.freeze -= dt
@@ -555,7 +557,7 @@ function SwordCombo.Play(char, index, hooks, styleName)
 			if hooks.onLunge then hooks.onLunge(clip.lunge[2]) end
 		end
 		-- upper-body layer: ease the legs between "clip" and "walk cycle" (~0.15 s) as the player starts/stops moving
-		local wantLeg = (planted or not isWalking(root, hum)) and 1 or 0
+		local wantLeg = (planted or not isWalking(root)) and 1 or 0
 		st.legW += math.clamp(wantLeg - st.legW, -realDt * 7, realDt * 7)
 		local legW = smooth(st.legW)
 		local walkW = 1 - legW

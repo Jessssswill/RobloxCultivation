@@ -45,6 +45,7 @@ return function(tool)
 
 	local step, lastEnd, current, queued, chainAt = 0, 0, nil, false, 0
 	local savedSpeed
+	local ownChain = false -- true only while this script starts its own next hit (see onEnd)
 
 	local function restoreSpeed(hum)
 		if savedSpeed and hum and hum.Parent then hum.WalkSpeed = savedSpeed end
@@ -72,9 +73,11 @@ return function(tool)
 		savedSpeed = savedSpeed or hum.WalkSpeed
 		-- keep walking while swinging, just slower (light hits ~60 %, the finisher ~30 %), Ink Brush / Type Soul style
 		hum.WalkSpeed = savedSpeed * (clip.move or 0.6) -- each style sets its own (Dragon heavy = slow, Lightning = fast)
-		-- next click is accepted a little after contact so the combo flows without cutting the follow-through short
-		chainAt = os.clock() + clip.contact[#clip.contact] + 0.16
+		-- clicks before this hit has landed are queued; chainAt opens once its last contact has really happened (below),
+		-- not at a fixed time: on a slow phone the clip runs behind the clock and a timer would cut the hit off before it lands
+		chainAt = math.huge
 		local mine
+		ownChain = true
 		mine = SwordCombo.Play(char, i, {
 			onTrail = function(on)
 				setTrail(on)
@@ -85,20 +88,27 @@ return function(tool)
 				remote:FireServer(i, contactIndex)
 				SwordFX.Spawn(char, tool, clip, "Contact")
 				SwordCombo.HitStop(char, clip.heavy and 0.1 or 0.055)
+				if contactIndex == #clip.contact and current == mine then
+					-- next hit a little after this one lands, so the combo flows without cutting the follow-through short
+					chainAt = os.clock() + 0.16
+					task.delay(0.16, function()
+						if queued and current == mine and tool.Parent == char then attack() end
+					end)
+				end
 			end,
 			onEnd = function(chained)
 				if current == mine then current = nil end
-				if not chained then
-					restoreSpeed(hum)
-					lastEnd = os.clock()
-					if i == count then step = 0 end
-				end
+				-- chained into our own next hit: that hit keeps the slow walk and the combo count going. Anything else
+				-- (clip finished, unequip, a Z/X/G skill taking over the body) must give the walk speed back, or the
+				-- player stays slowed after casting a skill in the middle of a combo.
+				if chained and ownChain then return end
+				restoreSpeed(hum)
+				lastEnd = os.clock()
+				if i == count then step = 0 end
 			end,
 		}, style)
+		ownChain = false
 		current = mine
-		task.delay(math.max(0, chainAt - os.clock()), function()
-			if queued and current == mine and tool.Parent == char then attack() end
-		end)
 	end
 
 	tool.Activated:Connect(attack)

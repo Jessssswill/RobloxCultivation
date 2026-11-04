@@ -283,10 +283,11 @@ local function flipbooks(f, cf, pal, mult, groundToo)
 			end
 		end
 	end
-	local slash = pack:FindFirstChild("InkSlash") and pack.InkSlash:FindFirstChild("Slash")
+	local ink = pack:FindFirstChild("InkSlash")
+	local slash = ink and ink:FindFirstChild("Slash")
 	if slash then from(slash) end
-	if groundToo then
-		local g = pack.InkSlash:FindFirstChild("GroundEffects")
+	if groundToo and ink then -- (pack.InkSlash would throw if the pack was moved/renamed)
+		local g = ink:FindFirstChild("GroundEffects")
 		if g then from(g) end
 	end
 end
@@ -456,7 +457,7 @@ local BANDS = {
 	{ 0.4, 0.8, "main", 0.2, 1 },
 	{ 0.8, 1.0, "core", 0.05, 0.85 },
 }
-local function sweep(char, tool, pal, heavy, element, tier)
+local function sweep(char, tool, pal, heavy, element, tier, window)
 	if sweeping[tool] then return end
 	local B = SwordFX.BUDGET[tier]
 	local bands = tier == 1 and BANDS_LOW or BANDS
@@ -467,6 +468,9 @@ local function sweep(char, tool, pal, heavy, element, tier)
 	for _, d in ipairs(tool:GetDescendants()) do
 		if d:IsA("Trail") then table.insert(trails, d) end
 	end
+	-- the sweep follows the sword's Trail on/off; a sword without a Trail falls back to the clip's trail window
+	local hasTrail = #trails > 0
+	window = (window or 0.25) / math.max(0.05, workspace:GetAttribute("SwordComboTimeScale") or 1)
 	local f = folderFx()
 	local function edge()
 		local tip = part.CFrame:PointToWorldSpace(axis * half * 1.08)
@@ -501,7 +505,9 @@ local function sweep(char, tool, pal, heavy, element, tier)
 	conn = RunService.RenderStepped:Connect(function()
 		local on = false
 		for _, t in ipairs(trails) do if t.Enabled then on = true break end end
-		if not part.Parent or not char.Parent or (os.clock() - started > 0.05 and not on) or os.clock() - started > 1.2 then
+		local age = os.clock() - started
+		local over = if hasTrail then (age > 0.05 and not on) else age > window
+		if not part.Parent or not char.Parent or over or age > 1.2 then
 			conn:Disconnect()
 			sweeping[tool] = nil
 			tipEm.Enabled = false
@@ -554,6 +560,7 @@ local function sweep(char, tool, pal, heavy, element, tier)
 end
 
 -- local player only: camera shake, FOV punch, a one-frame colour "impact frame" on the finisher
+local fovBase, fovUntil = nil, 0
 local function feel(char, strength, heavy)
 	if Players.LocalPlayer.Character ~= char then return end
 	local hum = char:FindFirstChildOfClass("Humanoid")
@@ -569,9 +576,13 @@ local function feel(char, strength, heavy)
 			if hum.Parent then hum.CameraOffset = Vector3.zero end
 		end)
 	end
-	local fov = cam.FieldOfView
-	cam.FieldOfView = fov + (heavy and 6 or 2.5)
-	TweenService:Create(cam, TI(0.25, Enum.EasingStyle.Quad), { FieldOfView = fov }):Play()
+	-- FOV punch. Fast combos land the next hit before the last punch has settled: always return to the FOV from before
+	-- the first punch of the burst, otherwise every hit would ratchet the camera FOV up a little more for good.
+	local now = os.clock()
+	if not fovBase or now > fovUntil then fovBase = cam.FieldOfView end
+	fovUntil = now + 0.25 * slow() + 0.03
+	cam.FieldOfView = fovBase + (heavy and 6 or 2.5)
+	TweenService:Create(cam, TI(0.25, Enum.EasingStyle.Quad), { FieldOfView = fovBase }):Play()
 	if heavy then
 		local cc = Instance.new("ColorCorrectionEffect")
 		cc.Contrast, cc.Saturation, cc.Brightness = 0.6, -0.6, 0.15
@@ -590,13 +601,13 @@ function SwordFX.Spawn(char, tool, clip, phase)
 	local B = SwordFX.BUDGET[tier]
 	local pal = palette(tool)
 	local el = tool and tool:GetAttribute("Element")
-	local f = folderFx()
 	local fx = clip.fx
 	local cf = root.CFrame
 	if phase == "Swing" then
 		if fx.thrust then
 			-- spiral spear of light straight ahead
 			if not allow(3, tier) then return end
+			local f = folderFx()
 			for i = 1, 3 do
 				local p = bare(Instance.new("Part"))
 				p.Material = Enum.Material.Neon
@@ -610,9 +621,10 @@ function SwordFX.Spawn(char, tool, clip, phase)
 				}):Play()
 			end
 		else
-			sweep(char, tool, pal, clip.heavy, el, tier)
+			sweep(char, tool, pal, clip.heavy, el, tier, clip.trail[2] - clip.trail[1])
 		end
 	elseif phase == "Contact" then
+		local f = folderFx()
 		local heavy = clip.heavy
 		local pos = cf:PointToWorldSpace(Vector3.new(0, 0.4, -(fx.reach * 0.62)))
 		-- the impact is what sells the hit, so it always shows; only its part counts shrink with the tier

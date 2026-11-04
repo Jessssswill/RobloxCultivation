@@ -9,14 +9,34 @@ return function(tool, opts)
 	local SwordCombo = require(game:GetService("ReplicatedStorage"):WaitForChild("SwordCombo"))
 	local remote = tool:WaitForChild("Hit")
 	local last, count = 0, 0
+	local lastStep, stepHits = 0, 0
 	remote.OnServerEvent:Connect(function(plr, step)
 		local char = tool.Parent
 		if typeof(step) ~= "number" or step % 1 ~= 0 or not char or plr.Character ~= char then return end
 		local root = char:FindFirstChild("HumanoidRootPart")
-		if not root or os.clock() - last < 0.1 then return end
+		if not root then return end
 		local clip = SwordCombo.Get(step, SwordCombo.StyleOf(tool))
 		if not clip then return end
-		last = os.clock()
+		-- anti-spam (exploiters firing the heavy finisher over and over): a hit must be the next contact of the same clip,
+		-- a later step of the combo, or a restart at 1, and can't arrive faster than half the real gap the clip allows
+		-- (half, so lag and jitter never eat a legit hit).
+		local now = os.clock()
+		local same = step == lastStep and stepHits < #clip.contact
+		local minGap
+		if same then
+			minGap = (clip.contact[stepHits + 1] - clip.contact[stepHits]) * 0.5
+		elseif step == 1 or step > lastStep then
+			minGap = (0.16 + clip.contact[1]) * 0.5 -- the client chains 0.16 s after the previous contact at the earliest
+		else
+			return
+		end
+		if now - last < math.max(0.08, minGap) then return end
+		last = now
+		if same then
+			stepHits += 1
+		else
+			lastStep, stepHits = step, 1
+		end
 		if opts.onHit then opts.onHit(tool) end
 		local heavy = clip.heavy == true
 		local size, cf
