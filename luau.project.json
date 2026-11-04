@@ -26,6 +26,18 @@
 			"WeaponScale": {
 				"$path": "luau/ReplicatedStorage/WeaponScale.lua",
 				"$ignoreUnknownInstances": true
+			},
+			"SwordCombo": {
+				"$path": "luau/ReplicatedStorage/SwordCombo.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SwordFX": {
+				"$path": "luau/ReplicatedStorage/SwordFX.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SwordComboClient": {
+				"$path": "luau/ReplicatedStorage/SwordComboClient.lua",
+				"$ignoreUnknownInstances": true
 			}
 		},
 		"ServerScriptService": {
@@ -100,6 +112,14 @@
 			},
 			"ShiqiaoVillagers": {
 				"$path": "luau/ServerScriptService/ShiqiaoVillagers.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SwordComboServer": {
+				"$path": "luau/ServerScriptService/SwordComboServer.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"SwordComboRelay": {
+				"$path": "luau/ServerScriptService/SwordComboRelay.server.lua",
 				"$ignoreUnknownInstances": true
 			}
 		},
@@ -181,6 +201,10 @@
 				},
 				"MountCamFX": {
 					"$path": "luau/StarterPlayerScripts/MountCamFX.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"SwordComboRemote": {
+					"$path": "luau/StarterPlayerScripts/SwordComboRemote.client.lua",
 					"$ignoreUnknownInstances": true
 				}
 			}

@@ -23,6 +23,15 @@ local KC = Enum.KeyCode
 local TEX_SPARK = "rbxasset://textures/particles/sparkles_main.dds"
 local TEX_SMOKE = "rbxasset://textures/particles/smoke_main.dds"
 local MAX_DIST = 320
+-- self-made VFX textures (assets/VFX/textures_v1). nil = fall back to the old part-based look
+local VTX = { -- uploaded 2026-11-01 (will OK'd)
+	lightningFlip = "rbxassetid://85766794891773", lightningBeam = "rbxassetid://123916754948707", glow = "rbxassetid://86794260657796",
+	flare = "rbxassetid://74917717176224", spark = nil, shock = "rbxassetid://120638941464407", smokeFlip = "rbxassetid://128189018436398",
+	frost = "rbxassetid://106494765248742", snow = "rbxassetid://132476517971091", petal = "rbxassetid://115963999420447",
+	lotus = "rbxassetid://125562162597738", aura = "rbxassetid://103751465846390", crescent = "rbxassetid://116325702137675",
+	swirl = "rbxassetid://74831198929905",
+	formation = {Thunder = "rbxassetid://100516579563166", Ice = "rbxassetid://135665340346401", Lotus = "rbxassetid://70633139336376", Jade = "rbxassetid://91197797275866"},
+}
 
 local THEME = {
 	Thunder = {a = Color3.fromRGB(235, 245, 255), b = Color3.fromRGB(90, 170, 255), c = Color3.fromRGB(45, 50, 80)},
@@ -38,6 +47,13 @@ local SKILLS = {
 	Jade = {Z = {"Dragon Roar", 4, "Crescent"}, X = {"Jade Dragon Rush", 9, "SwordRain"}, G = {"Jade Dragon Descends", 28, "SwordRain"}},
 }
 local KEYS = {[KC.Z] = "Z", [KC.X] = "X", [KC.G] = "G"}
+-- body motion for each skill (procedural, same system as the click combo; works live without uploaded animations)
+local SwordCombo = require(RS:WaitForChild("SwordCombo"))
+local SwordFX = require(RS:WaitForChild("SwordFX"))
+local ComboRelay = RS:WaitForChild("SwordComboRelay")
+local MOTION = {Z = "SkillZ", X = "SkillX", G = "Ult"}
+-- calligraphy name shown in the ultimate cutscene
+local ULT_HAN = {Thunder = "九霄雷劫", Ice = "冰封天斩", Lotus = "千瓣莲华", Jade = "玉龙降世"}
 
 local folder = Instance.new("Folder")
 folder.Name = "WeaponFxLocal"
@@ -118,11 +134,20 @@ end
 
 -- cincin datar yang membesar
 local FLAT = CFrame.Angles(0, 0, math.rad(90))
+-- 2026-11-01: hollow ring of glowing blades instead of a solid disk (solid disks read as white blobs and hide the fight)
 local function ring(pos, radius, color, t, thick, transp)
-	local r = part(Vector3.new(thick or 0.3, 1, 1), CFrame.new(pos) * FLAT, color, {Shape = Enum.PartType.Cylinder, Transparency = transp or 0.2})
-	tween(r, t, {Size = Vector3.new(thick or 0.3, radius * 2, radius * 2)}, Enum.EasingStyle.Quint)
-	fade(r, t * 0.8, t * 0.4)
-	return r
+	local n = math.clamp(math.floor(radius * 2.2), 14, 40)
+	local w = (thick or 0.3) * 1.4
+	local first
+	for i = 1, n do
+		local base = CFrame.new(pos) * CFrame.Angles(0, (i / n) * math.pi * 2, 0)
+		local seg = math.max(0.6, radius * 2 * math.pi / n * 0.8)
+		local p = part(Vector3.new(0.6, w * 0.6, 0.25), base * CFrame.new(0, 0, -0.8), color, {Transparency = transp or 0.15})
+		tween(p, t, {CFrame = base * CFrame.new(0, 0, -radius), Size = Vector3.new(seg, w * 0.4, 0.5)}, Enum.EasingStyle.Quint)
+		fade(p, t * 0.8, t * 0.4)
+		first = first or p
+	end
+	return first
 end
 
 local function ground(pos)
@@ -164,6 +189,46 @@ local function segment(a, b, width, color, life, transp)
 end
 
 local function bolt(a, b, jag, width, life, th, branches)
+	if VTX.lightningBeam then -- hand-drawn bolt texture on two camera-facing beams, flickering
+		local holder = part(Vector3.one * 0.2, CFrame.new(a), th.a, {Transparency = 1})
+		local a0 = Instance.new("Attachment") a0.Parent = holder a0.WorldPosition = a
+		local a1 = Instance.new("Attachment") a1.Parent = holder a1.WorldPosition = b
+		local flip = math.random() < 0.5
+		for k = 1, 2 do
+			local bm = Instance.new("Beam")
+			bm.Attachment0, bm.Attachment1 = flip and a1 or a0, flip and a0 or a1
+			bm.Texture = VTX.lightningBeam
+			bm.TextureMode = Enum.TextureMode.Stretch
+			bm.LightEmission, bm.LightInfluence = 1, 0
+			bm.FaceCamera = true
+			bm.Segments = 12
+			bm.Color = ColorSequence.new(k == 1 and th.a or th.b)
+			local w = (k == 1 and 5 or 12) * width + jag * (k == 1 and 1.4 or 3)
+			bm.Width0, bm.Width1 = w, w * 0.85
+			bm.CurveSize0, bm.CurveSize1 = (math.random() - 0.5) * jag * 2, (math.random() - 0.5) * jag * 2
+			bm.Parent = holder
+			local base = k == 1 and 0 or 0.35
+			local t0 = os.clock()
+			task.spawn(function()
+				while bm.Parent and os.clock() - t0 < life do
+					local u = (os.clock() - t0) / life
+					bm.Transparency = NumberSequence.new(math.clamp(base + u * u * 0.9 + math.random() * 0.25, 0, 1))
+					task.wait(0.03)
+				end
+				bm.Transparency = NumberSequence.new(1)
+			end)
+		end
+		if VTX.glow then burst(b, th.b, 1, 0, width * 14 + jag, VTX.glow, life) end
+		if branches then
+			for _ = 1, 2 do
+				local mid = a:Lerp(b, 0.3 + math.random() * 0.4)
+				local off = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5).Unit * (b - a).Magnitude * 0.25
+				bolt(mid, mid + off, jag * 0.5, width * 0.5, life * 0.8, th, false)
+			end
+		end
+		Debris:AddItem(holder, life + 0.1)
+		return
+	end
 	local n = math.clamp(math.floor((b - a).Magnitude / 2.2), 3, 18)
 	local dir = (b - a).Unit
 	local side = dir:Cross(Vector3.yAxis)
@@ -187,30 +252,42 @@ local function bolt(a, b, jag, width, life, th, branches)
 end
 
 -- awan petir dari beberapa bola + asap
+-- 2026-11-01: storm cloud made of thick churning smoke with lightning flickering inside (the old solid balls read as black marbles)
 local function cloud(pos, size, th, life)
 	local parts = {}
-	for i = 1, 6 do
-		local off = Vector3.new((math.random() - 0.5) * size * 1.4, (math.random() - 0.5) * size * 0.25, (math.random() - 0.5) * size * 1.4)
-		local s = size * (0.45 + math.random() * 0.35)
-		local b = part(Vector3.new(s, s * 0.55, s), CFrame.new(pos + off), th.c, {Shape = Enum.PartType.Ball, Material = Enum.Material.SmoothPlastic, Transparency = 1})
-		tween(b, 0.4, {Transparency = 0.18})
-		fade(b, 0.6, life)
+	for i = 1, 4 do
+		local off = Vector3.new((math.random() - 0.5) * size * 1.2, (math.random() - 0.5) * size * 0.2, (math.random() - 0.5) * size * 1.2)
+		local b = part(Vector3.new(size * 0.6, size * 0.3, size * 0.6), CFrame.new(pos + off), th.c, {Transparency = 1})
+		local smoke = Instance.new("ParticleEmitter")
+		smoke.Texture = TEX_SMOKE
+		smoke.Color = ColorSequence.new(Color3.fromRGB(40, 46, 70), Color3.fromRGB(85, 100, 140))
+		smoke.LightEmission, smoke.LightInfluence = 0, 0.4
+		smoke.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, size * 0.55), NumberSequenceKeypoint.new(1, size * 0.95)})
+		smoke.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.3), NumberSequenceKeypoint.new(0.8, 0.45), NumberSequenceKeypoint.new(1, 1)})
+		smoke.Lifetime = NumberRange.new(1.2, 1.8)
+		smoke.Rate = 14
+		smoke.Speed = NumberRange.new(0.5, 2)
+		smoke.Rotation = NumberRange.new(0, 360)
+		smoke.RotSpeed = NumberRange.new(-25, 25)
+		smoke.SpreadAngle = Vector2.new(180, 25)
+		smoke.Parent = b
+		smoke:Emit(6)
+		local glow = Instance.new("ParticleEmitter")
+		glow.Texture = TEX_SPARK
+		glow.Color = ColorSequence.new(th.a, th.b)
+		glow.LightEmission, glow.LightInfluence = 1, 0
+		glow.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, size * 0.5), NumberSequenceKeypoint.new(1, 0)})
+		glow.Transparency = NumberSequence.new(0.2, 1)
+		glow.Lifetime = NumberRange.new(0.08, 0.16)
+		glow.Rate = 9
+		glow.Speed = NumberRange.new(0, 0)
+		glow.Parent = b
+		task.delay(life, function() smoke.Enabled = false glow.Enabled = false end)
+		Debris:AddItem(b, life + 2)
 		table.insert(parts, b)
 	end
-	local e = Instance.new("ParticleEmitter")
-	e.Texture = TEX_SMOKE
-	e.Color = ColorSequence.new(Color3.fromRGB(70, 80, 110))
-	e.Size = NumberSequence.new(size * 0.5, size * 0.9)
-	e.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.3, 0.6), NumberSequenceKeypoint.new(1, 1)})
-	e.Lifetime = NumberRange.new(1, 1.6)
-	e.Rate = 6
-	e.Speed = NumberRange.new(0.5, 1.5)
-	e.SpreadAngle = Vector2.new(180, 20)
-	e.Parent = parts[1]
-	task.delay(life, function() e.Enabled = false end)
 	return parts
 end
-
 local function strike(pos, radius, big, th)
 	th = th or THEME.Thunder
 	local sky = pos + Vector3.new((math.random() - 0.5) * 4, big and 60 or 34, (math.random() - 0.5) * 4)
@@ -219,8 +296,6 @@ local function strike(pos, radius, big, th)
 		task.delay(0.05, function() bolt(sky + Vector3.new(2, 0, -2), pos, 7, 0.5, 0.5, th, true) end)
 	end
 	ring(pos + Vector3.new(0, 0.2, 0), radius, th.b, 0.35, 0.3)
-	local scorch = part(Vector3.new(0.15, radius * 1.4, radius * 1.4), CFrame.new(pos + Vector3.new(0, 0.1, 0)) * FLAT, th.a, {Shape = Enum.PartType.Cylinder, Transparency = 0.3})
-	fade(scorch, 0.4, 0.05)
 	burst(pos + Vector3.new(0, 0.5, 0), th.a, big and 40 or 14, big and 40 or 22, big and 1.2 or 0.6)
 	light(pos + Vector3.new(0, 4, 0), th.b, big and 12 or 6, big and 40 or 20, 0.3)
 end
@@ -461,30 +536,192 @@ local function screenFlash(color, t)
 	tween(flashF, t, {BackgroundTransparency = 1})
 end
 
-local function cutIn(text, th)
+local han = title:Clone()
+han.Position = UDim2.fromScale(0.5, 0.5)
+han.Size = UDim2.fromScale(0.8, 0.2)
+han.Font = Enum.Font.Garamond
+han.Parent = gui
+local hanGrad = Instance.new("UIGradient")
+hanGrad.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.48, 0), NumberSequenceKeypoint.new(0.52, 1), NumberSequenceKeypoint.new(1, 1)})
+hanGrad.Parent = han
+local titleGrad = hanGrad:Clone()
+titleGrad.Parent = title
+
+local function bladeTip(char)
+	local tool = char:FindFirstChildOfClass("Tool")
+	local h = tool and tool:FindFirstChild("Handle")
+	if not h then return (char:FindFirstChild("Head") or char.PrimaryPart).Position end
+	local best, bm
+	for _, d in tool:GetDescendants() do
+		if d:IsA("BasePart") and d ~= h and d.Transparency < 1 and (not bm or d.Size.Magnitude > bm) then best, bm = d, d.Size.Magnitude end
+	end
+	best = best or h
+	local sz = best.Size
+	local ax = (sz.X >= sz.Y and sz.X >= sz.Z) and Vector3.xAxis or ((sz.Y >= sz.Z) and Vector3.yAxis or Vector3.zAxis)
+	local half = math.max(sz.X, sz.Y, sz.Z) / 2
+	local a, b = best.CFrame:PointToWorldSpace(ax * half), best.CFrame:PointToWorldSpace(-ax * half)
+	return (a - h.Position).Magnitude > (b - h.Position).Magnitude and a or b
+end
+
+-- qi of the element streams in from all around and soaks into the blade
+local function gather(char, th, dur)
+	local t0 = os.clock()
+	while os.clock() - t0 < dur and char.Parent do
+		local tip = bladeTip(char)
+		for _ = 1, 3 do
+			local dir = Vector3.new(math.random() - 0.5, math.random() * 0.8 - 0.2, math.random() - 0.5)
+			if dir.Magnitude > 0.01 then
+				local from = tip + dir.Unit * (7 + math.random() * 5)
+				local p = part(Vector3.new(0.12, 0.12, 1.6), CFrame.lookAt(from, tip), math.random() < 0.4 and th.a or th.b)
+				tween(p, 0.32, {CFrame = CFrame.lookAt(tip, tip + (tip - from).Unit), Size = Vector3.new(0.05, 0.05, 0.4)}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+				fade(p, 0.08, 0.3)
+			end
+		end
+		task.wait(0.03)
+	end
+end
+
+-- ultimate cutscene (local player only, ~6.2 s), timed to the long Ult clip in SwordCombo:
+-- 0-1.3 close-up on the face and the sword-finger seal -> 1.3-2.6 wide orbit while the set piece grows (avatar, dragon, throne...)
+-- -> 2.6-3.55 low hero shot as the blade rises, calligraphy name -> 3.55 whip -> 3.7 impact frame on the cleave -> wide shot of the payoff
+-- Player attribute UltCutscene = false (settings menu, later) skips all camera work.
+local camRay = RaycastParams.new()
+camRay.FilterType = Enum.RaycastFilterType.Exclude
+local ORBIT = {Thunder = {26, 14}, Jade = {24, 12}, Lotus = {21, 7}, Ice = {13, 3}}
+local function cutIn(text, th, el, aim)
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	if not root then return end
-	tween(topBar, 0.25, {Size = UDim2.fromScale(1, 0.12)})
-	tween(botBar, 0.25, {Size = UDim2.fromScale(1, 0.12)})
-	title.Text = text
-	title.TextColor3 = th.a
-	title.TextStrokeColor3 = th.b
-	tween(title, 0.3, {TextTransparency = 0, TextStrokeTransparency = 0.1})
+	if player:GetAttribute("UltCutscene") == false then
+		task.wait(4.6)
+		return
+	end
 	local head = char:FindFirstChild("Head") or root
+	local base = root.CFrame
+	local fov0 = cam.FieldOfView
+	local target = aim and Vector3.new(aim.X, root.Position.Y, aim.Z) or (base * CFrame.new(0, 0, -16)).Position
+	if (target - root.Position).Magnitude < 6 then target = (base * CFrame.new(0, 0, -16)).Position end
+	local o = ORBIT[el] or ORBIT.Ice
+	local big = el == "Thunder"
+	tween(topBar, 0.25, {Size = UDim2.fromScale(1, 0.13)})
+	tween(botBar, 0.25, {Size = UDim2.fromScale(1, 0.13)})
+	local cc = Instance.new("ColorCorrectionEffect")
+	cc.Name = "WeaponUltCut"
+	cc.Parent = Lighting
+	tween(cc, 0.4, {Saturation = -0.55, Contrast = 0.25, TintColor = th.b:Lerp(Color3.new(1, 1, 1), 0.65)})
+	han.Text = ULT_HAN[el] or ""
+	han.TextColor3, han.TextStrokeColor3 = th.a, th.c
+	title.Text = text
+	title.TextColor3, title.TextStrokeColor3 = th.a, th.b
+	hanGrad.Offset, titleGrad.Offset = Vector2.new(-1, 0), Vector2.new(-1, 0)
+	task.spawn(gather, char, th, 3.55)
+	ring(root.Position - Vector3.new(0, 2.6, 0), 9, th.b, 0.7, 0.3)
+	local t0 = os.clock()
+	local shake, impact = 0, false
 	cam.CameraType = Enum.CameraType.Scriptable
-	cam.CFrame = CFrame.lookAt((root.CFrame * CFrame.new(1.8, 1.6, -6.5)).Position, head.Position)
-	tween(cam, 0.8, {CFrame = CFrame.lookAt((root.CFrame * CFrame.new(1.1, 1.7, -4.3)).Position, head.Position)}, Enum.EasingStyle.Sine)
-	burst(root.Position, th.a, 30, 14, 0.8)
-	ring(root.Position - Vector3.new(0, 2.5, 0), 8, th.b, 0.6, 0.25)
-	task.wait(0.85)
-	screenFlash(th.a, 0.45)
-	tween(cam, 0.45, {CFrame = CFrame.lookAt((root.CFrame * CFrame.new(0, 14, 26)).Position, root.Position + root.CFrame.LookVector * 14)}, Enum.EasingStyle.Quad)
-	task.wait(0.45)
+	RunS:BindToRenderStep("WeaponUltCam", Enum.RenderPriority.Camera.Value + 2, function()
+		if not char.Parent then return end
+		local t = os.clock() - t0
+		local hp = head.Position
+		local cf, fov
+		if t < 1.3 then -- 1. close-up, slow push in on the face and seal
+			local u = t / 1.3
+			u = 1 - (1 - u) ^ 2
+			cf = CFrame.lookAt((base * CFrame.new(1.4 - 0.5 * u, 0.8 + 0.2 * u, -5.6 + 1.8 * u)).Position, hp - Vector3.new(0, 0.35, 0))
+			fov = 46 - 8 * u
+		elseif t < 2.6 then -- 2. pull out into a wide orbit so the set piece behind/around the caster reads
+			local u = (t - 1.3) / 1.3
+			u = u * u * (3 - 2 * u)
+			local ang = math.rad(-55 + 110 * u)
+			local d = o[1] * (0.7 + 0.3 * u)
+			cf = CFrame.lookAt((base * CFrame.Angles(0, ang, 0) * CFrame.new(0, 2 + o[2] * 0.3, -d)).Position, hp + Vector3.new(0, 1 + o[2] * 0.6 * u, 0))
+			fov = 58 + 10 * u
+		elseif t < 3.55 then -- 3. low hero shot looking up as the blade goes to the sky
+			local u = (t - 2.6) / 0.95
+			local tip = bladeTip(char)
+			local d = big and 17 or (el == "Jade" and 10 or 8)
+			local look = big and hp + Vector3.new(0, 13, 0) or hp:Lerp(tip, 0.55)
+			cf = CFrame.lookAt((base * CFrame.Angles(0, math.rad(25 - 15 * u), 0) * CFrame.new(0, 0.6, -d + 1.2 * u)).Position, look)
+			fov = 64
+		elseif t < 3.7 then -- 4. whip in from the side
+			local u = (t - 3.55) / 0.15
+			cf = CFrame.lookAt((base * CFrame.new(4 - 1.5 * u, 1.4, -2.5)).Position, hp)
+			fov = 62 + 18 * u
+		else -- 5. wide shot of the payoff, slow dolly, shake
+			local u = math.min(1, (t - 3.7) / 2.5)
+			local back = (root.Position - target)
+			back = Vector3.new(back.X, 0, back.Z)
+			back = back.Magnitude > 0.01 and back.Unit or -base.LookVector
+			local side = back:Cross(Vector3.yAxis)
+			local pos, look
+			if big then -- side-on so the avatar and the target are both in frame
+				pos = root.Position + side * (40 + 6 * u) + back * 12 + Vector3.new(0, 14 + 3 * u, 0)
+				look = root.Position:Lerp(target, 0.4) + Vector3.new(0, 10, 0)
+			elseif el == "Jade" then
+				pos = root.Position + back * (18 + 6 * u) + side * 10 + Vector3.new(0, 14 + 4 * u, 0)
+				look = root.Position:Lerp(target, 0.65) + Vector3.new(0, 4 * (1 - u), 0)
+			else
+				pos = root.Position + back * (14 + 6 * u) + side * 7 + Vector3.new(0, 9 + 3 * u, 0)
+				look = root.Position:Lerp(target, 0.65)
+			end
+			cf = CFrame.lookAt(pos, look)
+			fov = 72
+		end
+		if t >= 1.3 then -- keep the camera out of trees, roofs and the ground
+			local to = cf.Position
+			local ex = {char, folder}
+			for _ = 1, 4 do
+				camRay.FilterDescendantsInstances = ex
+				local r = workspace:Raycast(hp, to - hp, camRay)
+				if not r then break end
+				if r.Instance ~= workspace.Terrain and r.Instance.Transparency > 0.6 then
+					table.insert(ex, r.Instance)
+				else
+					cf = cf + (r.Position - (to - hp).Unit * 1.2 - to)
+					break
+				end
+			end
+		end
+		if shake > 0 then
+			shake = math.max(0, shake - 1 / 60)
+			local k = shake * 1.6
+			cf = cf * CFrame.new((math.random() - 0.5) * k, (math.random() - 0.5) * k, 0) * CFrame.Angles(0, 0, (math.random() - 0.5) * k * 0.05)
+		end
+		cam.CFrame = cf
+		cam.FieldOfView = fov
+		if t >= 3.7 and not impact then
+			impact = true
+			shake = 0.55
+		end
+	end)
+	task.wait(2.6)
+	-- name reveal on the hero shot
+	ring(root.Position - Vector3.new(0, 2.6, 0), 13, th.a, 0.6, 0.4, 0.2)
+	tween(han, 0.01, {TextTransparency = 0, TextStrokeTransparency = 0.2})
+	tween(title, 0.01, {TextTransparency = 0, TextStrokeTransparency = 0.2})
+	tween(hanGrad, 0.45, {Offset = Vector2.new(1, 0)}, Enum.EasingStyle.Sine)
+	task.delay(0.12, function() tween(titleGrad, 0.45, {Offset = Vector2.new(1, 0)}, Enum.EasingStyle.Sine) end)
+	task.wait(1.1)
+	-- impact frame: two frames of inverted black/white, then the colour comes back hot
+	flashF.BackgroundColor3 = Color3.new(0, 0, 0)
+	flashF.BackgroundTransparency = 0.45
+	cc.Saturation, cc.Contrast, cc.Brightness = -1, 1, 0.15
+	han.TextTransparency, title.TextTransparency = 1, 1
+	han.TextStrokeTransparency, title.TextStrokeTransparency = 1, 1
+	task.wait(0.05)
+	flashF.BackgroundColor3 = th.a
+	flashF.BackgroundTransparency = 0.1
+	task.wait(0.05)
+	tween(flashF, 0.4, {BackgroundTransparency = 1})
+	tween(cc, 0.5, {Saturation = 0.2, Contrast = 0.1, Brightness = 0})
+	task.wait(2.4)
+	RunS:UnbindFromRenderStep("WeaponUltCam")
 	cam.CameraType = Enum.CameraType.Custom
+	tween(cam, 0.4, {FieldOfView = fov0})
 	tween(topBar, 0.3, {Size = UDim2.fromScale(1, 0)})
 	tween(botBar, 0.3, {Size = UDim2.fromScale(1, 0)})
-	task.delay(1.2, function() tween(title, 0.5, {TextTransparency = 1, TextStrokeTransparency = 1}) end)
+	tween(cc, 0.6, {Saturation = 0, Contrast = 0, TintColor = Color3.new(1, 1, 1)})
+	Debris:AddItem(cc, 0.7)
 end
 
 -- langit gelap sebentar waktu ultimate (cuma kalau dekat)
@@ -492,7 +729,7 @@ local function darkSky(color, dur)
 	local cc = Instance.new("ColorCorrectionEffect")
 	cc.Name = "WeaponUltSky"
 	cc.Parent = Lighting
-	tween(cc, 0.4, {Brightness = -0.12, Contrast = 0.15, Saturation = -0.25, TintColor = color})
+	tween(cc, 0.4, {Brightness = -0.04, Contrast = 0.15, Saturation = -0.2, TintColor = color})
 	task.delay(dur, function()
 		tween(cc, 0.8, {Brightness = 0, Contrast = 0, Saturation = 0, TintColor = Color3.new(1, 1, 1)})
 		Debris:AddItem(cc, 0.9)
@@ -629,13 +866,30 @@ local function cast(key)
 	busy = true
 	player:SetAttribute("Casting", true)
 	SkillRemote:FireServer(key, aim)
-	local tr = track(hum, s[3])
-	if tr then tr:Play(0.08) end
+	local motion = MOTION[key]
+	local clip = SwordCombo.Get(motion)
+	local trails = {}
+	for _, d in tool:GetDescendants() do
+		if d:IsA("Trail") then table.insert(trails, d) end
+	end
+	ComboRelay:FireServer(tool, motion)
+	SwordCombo.Play(char, motion, {
+		onTrail = function(on)
+			for _, t in trails do t.Enabled = on end
+			if on then SwordFX.Spawn(char, tool, clip, "Swing") end
+		end,
+		onContact = function()
+			SwordFX.Spawn(char, tool, clip, "Contact")
+			SwordCombo.HitStop(char, clip.heavy and 0.12 or 0.06)
+		end,
+		onEnd = function(chained)
+			if not chained then char:SetAttribute("SwordAttacking", false) end
+		end,
+	})
 	local speed = hum.WalkSpeed
 	if key == "G" then
 		hum.WalkSpeed = 0
-		cutIn(s[1]:upper(), THEME[el])
-		task.wait(0.4)
+		cutIn(s[1]:upper(), THEME[el], el, aim)
 	else
 		task.wait(0.5)
 	end
@@ -650,15 +904,746 @@ UIS.InputBegan:Connect(function(input, gp)
 	if key and equipped() then task.spawn(cast, key) end
 end)
 
+-- ===================== pedang roh raksasa =====================
+-- 2026-11-01: every ultimate drops a giant spirit copy of the caster's OWN sword (its real meshes, scaled up, made of
+-- glowing glass/forcefield in the element colour) point-first into the target, instead of a sword built from blocks
+local ultCaster = {}
+local function spiritBlade(el, center, height, th, fallDur, holdDur, onLand)
+	local plr = ultCaster[el]
+	local tool = plr and plr.Character and plr.Character:FindFirstChildOfClass("Tool")
+	local h = tool and tool:FindFirstChild("Handle")
+	if not h then return false end
+	local tip = bladeTip(plr.Character)
+	local tipLocal = h.CFrame:PointToObjectSpace(tip)
+	if tipLocal.Magnitude < 0.5 then return false end
+	local K = height / tipLocal.Magnitude
+	local rot = CFrame.fromRotationBetweenVectors(tipLocal.Unit, -Vector3.yAxis)
+	local pieces = {}
+	for _, d in tool:GetDescendants() do
+		if d:IsA("MeshPart") and d.Transparency < 0.6 and d.Size.Magnitude > 0.6 then
+			local off = h.CFrame:ToObjectSpace(d.CFrame)
+			for layer = 1, 2 do
+				local g = d:Clone()
+				for _, ch in g:GetChildren() do ch:Destroy() end
+				g.Anchored, g.CanCollide, g.CanQuery, g.CanTouch, g.CastShadow = true, false, false, false, false
+				g.Size = d.Size * K * (layer == 1 and 1 or 0.94)
+				g.Material = layer == 1 and Enum.Material.Glass or Enum.Material.Neon
+				g.Color = layer == 1 and th.b or th.a
+				g.Transparency = layer == 1 and 0.25 or 0.55
+				g.Reflectance = layer == 1 and 0.3 or 0
+				g.Parent = folder
+				table.insert(pieces, {g, CFrame.new(off.Position * K) * off.Rotation})
+			end
+		end
+	end
+	if #pieces == 0 then return false end
+	-- handle frame: tip points straight down; lands with the tip buried a little in the ground
+	local landH = CFrame.new(center + Vector3.new(0, height * 0.92, 0)) * rot
+	local fromH = landH + Vector3.new(0, 90, 0)
+	local spin = math.rad(math.random(0, 359))
+	local function place(cf)
+		local c = CFrame.new(cf.Position) * CFrame.Angles(0, spin, 0) * cf.Rotation
+		for _, pc in pieces do pc[1].CFrame = c * pc[2] end
+	end
+	place(fromH)
+	animate(fallDur, function(k)
+		place(fromH:Lerp(landH, k * k * k))
+	end, function()
+		place(landH)
+		if onLand then onLand() end
+		for _, pc in pieces do fade(pc[1], 0.5, holdDur) end
+	end)
+	return true
+end
+
+-- ===================== ultimate set pieces (2026-11-01) =====================
+-- Every sword's ultimate has its own donghua-style set piece, timed to the long cutscene:
+-- 0-1.3 seal close-up, 1.3-2.6 the set piece grows, 2.6-3.55 blade raised to the sky, 3.7 cleave (server damage starts), payoff until ~6.2
+-- Thunder = 法相 giant lightning avatar of the caster, Ice = 领域 frozen domain + sky-splitting cut, Lotus = 莲台 throne + 万剑 petal swords,
+-- Jade = 龙魂 jade dragon coiling up the caster then spiralling down on the target.
+local ULT = {LEAD = 3.7, recent = {}}
+
+-- flat textured disc (formation, lotus, frost, swirl...): glowing SurfaceGui image on an invisible plate
+function ULT.disc(pos, size, tex, color, life, o)
+	o = o or {}
+	if not o.down then pos += Vector3.new(0, o.lift or 0.8, 0) end -- sit above terrain grass
+	local p = part(Vector3.new(size, 0.05, size), CFrame.new(pos), color, {Transparency = 1})
+	local im
+	for _, face in (o.both and {Enum.NormalId.Top, Enum.NormalId.Bottom} or {o.down and Enum.NormalId.Bottom or Enum.NormalId.Top}) do
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = face
+		sg.LightInfluence = 0
+		sg.Brightness = o.bright or 2.5
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+		sg.CanvasSize = Vector2.new(1024, 1024)
+		sg.Parent = p
+		local l = Instance.new("ImageLabel")
+		l.Size = UDim2.fromScale(1, 1)
+		l.BackgroundTransparency = 1
+		l.Image = tex
+		l.ImageColor3 = color
+		l.ImageTransparency = 1
+		l.Parent = sg
+		tween(l, o.fadeIn or 0.4, {ImageTransparency = o.transp or 0})
+		task.delay(life, function()
+			if l.Parent then tween(l, o.fadeOut or 0.5, {ImageTransparency = 1}) end
+		end)
+		im = im or l
+	end
+	if o.grow then
+		p.Size = Vector3.new(o.grow[1], 0.05, o.grow[1])
+		tween(p, o.grow[2], {Size = Vector3.new(size, 0.05, size)}, Enum.EasingStyle.Quint)
+	end
+	local spin = math.rad(o.spin or 0)
+	if spin ~= 0 then
+		local base, t0 = CFrame.new(pos), os.clock()
+		local con
+		con = RunS.RenderStepped:Connect(function()
+			if not p.Parent then con:Disconnect() return end
+			p.CFrame = base * CFrame.Angles(0, spin * (os.clock() - t0), 0)
+		end)
+	end
+	Debris:AddItem(p, life + (o.fadeOut or 0.5) + 0.1)
+	return p, im
+end
+
+-- upright textured card visible from both sides (crescent waves)
+function ULT.card(cf, w, h, tex, color, life, bright)
+	local p = part(Vector3.new(w, h, 0.05), cf, color, {Transparency = 1})
+	local ims = {}
+	for _, face in {Enum.NormalId.Front, Enum.NormalId.Back} do
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = face
+		sg.LightInfluence = 0
+		sg.Brightness = bright or 3
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+		sg.CanvasSize = Vector2.new(1024, 512)
+		sg.Parent = p
+		local l = Instance.new("ImageLabel")
+		l.Size = UDim2.fromScale(1, 1)
+		l.BackgroundTransparency = 1
+		l.Image = tex
+		l.ImageColor3 = color
+		l.Parent = sg
+		task.delay(life * 0.5, function() if l.Parent then tween(l, life * 0.5, {ImageTransparency = 1}) end end)
+		table.insert(ims, l)
+	end
+	Debris:AddItem(p, life + 0.1)
+	return p, ims
+end
+
+function ULT.emit(parent, cfg)
+	local e = Instance.new("ParticleEmitter")
+	e.LightEmission, e.LightInfluence = 1, 0
+	e.Rate = 0
+	for k, v in cfg do e[k] = v end
+	e.Parent = parent
+	return e
+end
+
+-- star flare + soft glow at a point
+function ULT.flash(pos, color, size, life)
+	if not VTX.flare then return end
+	local p = part(Vector3.one * 0.2, CFrame.new(pos), color, {Transparency = 1})
+	ULT.emit(p, {Texture = VTX.flare, Color = ColorSequence.new(color), ZOffset = 2, Lifetime = NumberRange.new(life), Speed = NumberRange.new(0), Rotation = NumberRange.new(0, 45),
+		Size = NumberSequence.new({NumberSequenceKeypoint.new(0, size * 0.3), NumberSequenceKeypoint.new(0.15, size), NumberSequenceKeypoint.new(1, size * 0.5)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.6, 0.25), NumberSequenceKeypoint.new(1, 1)})}):Emit(1)
+	if VTX.glow then
+		ULT.emit(p, {Texture = VTX.glow, Color = ColorSequence.new(color), Lifetime = NumberRange.new(life * 1.3), Speed = NumberRange.new(0),
+			Size = NumberSequence.new(size * 0.6, size * 1.1), Transparency = NumberSequence.new(0.2, 1)}):Emit(1)
+	end
+	Debris:AddItem(p, life * 1.3 + 0.1)
+end
+
+function ULT.shock(pos, size, color, t, down)
+	if VTX.shock then ULT.disc(pos, size, VTX.shock, color, t * 0.35, {grow = {size * 0.1, t}, fadeOut = t * 0.65, bright = 3, fadeIn = 0.05, down = down}) end
+end
+ULT.GLYPHS = {
+	Thunder = {"雷", "霆", "震", "霄", "电", "鸣", "天", "罚"},
+	Ice = {"冰", "霜", "寒", "封", "雪", "凝", "天", "斩"},
+	Lotus = {"莲", "华", "净", "心", "花", "开", "千", "瓣"},
+	Jade = {"龙", "玉", "吟", "渊", "鳞", "腾", "云", "降"},
+}
+
+-- formation array (阵法): counter-rotating rings, an eight-point star and glowing glyphs; y > 5 = hangs in the sky
+function ULT.array(center, radius, th, el, life, y)
+	local tex = VTX.formation[el]
+	if tex then
+		local down = (y or 0) > 5
+		local pos = center + Vector3.new(0, y or 0.2, 0)
+		ULT.disc(pos, radius * 2.3, tex, th.b, life, {spin = 22, down = down, bright = 3, grow = {radius * 0.4, 0.7}, fadeIn = 0.5})
+		ULT.disc(pos + Vector3.new(0, down and -0.1 or 0.1, 0), radius * 1.15, tex, th.a, life, {spin = -45, down = down, bright = 2, grow = {radius * 0.2, 0.9}, fadeIn = 0.6, transp = 0.25})
+		ULT.shock(pos, radius * 3.2, th.a, 0.7, down)
+		return
+	end
+	local items = {}
+	local sky = (y or 0) > 5
+	local function add(p, rel, dir) table.insert(items, {p, rel, dir}) end
+	local function ringOf(r, n, w, color, dir)
+		local seg = 2 * math.pi * r / n * 1.03
+		for i = 1, n do
+			local p = part(Vector3.new(seg, 0.08, w), CFrame.new(center), color, {Transparency = 1})
+			add(p, CFrame.Angles(0, (i / n) * math.pi * 2, 0) * CFrame.new(0, 0, -r), dir)
+		end
+	end
+	ringOf(radius, 56, 0.35, th.b, 1)
+	ringOf(radius * 0.86, 48, 0.16, th.a, 1)
+	ringOf(radius * 0.55, 36, 0.25, th.b, -1)
+	local rs = radius * 0.55
+	for sq = 0, 1 do
+		for i = 0, 3 do
+			local a1, a2 = math.rad(sq * 45 + i * 90), math.rad(sq * 45 + (i + 1) * 90)
+			local v1 = Vector3.new(math.cos(a1) * rs, 0, math.sin(a1) * rs)
+			local v2 = Vector3.new(math.cos(a2) * rs, 0, math.sin(a2) * rs)
+			local p = part(Vector3.new(0.2, 0.08, (v2 - v1).Magnitude), CFrame.new(center), th.a, {Transparency = 1})
+			add(p, CFrame.lookAt((v1 + v2) / 2, v2), -1)
+		end
+	end
+	local glyphs = ULT.GLYPHS[el] or ULT.GLYPHS.Thunder
+	for i = 1, 8 do
+		local sz = radius * 0.22
+		local p = part(Vector3.new(sz, 0.05, sz), CFrame.new(center), th.b, {Transparency = 1})
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = sky and Enum.NormalId.Bottom or Enum.NormalId.Top
+		sg.LightInfluence = 0
+		sg.Brightness = 2
+		sg.Parent = p
+		local tl = Instance.new("TextLabel")
+		tl.Size = UDim2.fromScale(1, 1)
+		tl.BackgroundTransparency = 1
+		tl.TextScaled = true
+		tl.Font = Enum.Font.Garamond
+		tl.Text = glyphs[i]
+		tl.TextColor3, tl.TextStrokeColor3 = th.a, th.b
+		tl.TextTransparency, tl.TextStrokeTransparency = 1, 1
+		tl.Parent = sg
+		tween(tl, 0.6, {TextTransparency = 0, TextStrokeTransparency = 0.3})
+		task.delay(life, function()
+			if tl.Parent then tween(tl, 0.5, {TextTransparency = 1, TextStrokeTransparency = 1}) end
+		end)
+		add(p, CFrame.Angles(0, (i / 8) * math.pi * 2, 0) * CFrame.new(0, 0, -radius * 0.7) * CFrame.Angles(0, math.pi, 0), 1)
+	end
+	for _, it in items do
+		if it[1].Size.Y > 0.06 then tween(it[1], 0.6, {Transparency = 0.12}) end
+		fade(it[1], 0.5, life)
+	end
+	local t0 = os.clock()
+	local con
+	con = RunS.RenderStepped:Connect(function()
+		local t = os.clock() - t0
+		if t > life + 0.6 then con:Disconnect() return end
+		local base = CFrame.new(center + Vector3.new(0, y or 0.2, 0))
+		local ang = t * 0.7
+		for _, it in items do
+			if it[1].Parent then it[1].CFrame = base * CFrame.Angles(0, ang * it[3], 0) * it[2] end
+		end
+	end)
+end
+
+-- 法相: a giant energy copy of the caster rises behind them and mirrors every move, sword included
+function ULT.Thunder(plr, th, center)
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local g = ground(root.Position)
+	ULT.array(g, 15, th, "Thunder", 5.6)
+	local was = char.Archivable
+	char.Archivable = true
+	local ok, av = pcall(function() return char:Clone() end)
+	char.Archivable = was
+	if not ok or not av then return end
+	for _, d in av:GetDescendants() do
+		if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") or d:IsA("Clothing") or d:IsA("Decal") or d:IsA("SurfaceAppearance")
+			or d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Beam") or d:IsA("Light") or d:IsA("Sound")
+			or d:IsA("BillboardGui") or d:IsA("ForceField") or d:IsA("BodyColors") or d:IsA("ShirtGraphic") or d:IsA("Highlight") then
+			d:Destroy()
+		end
+	end
+	local avRoot = av:FindFirstChild("HumanoidRootPart")
+	if not avRoot then av:Destroy() return end
+	local parts = {}
+	for _, d in av:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.CanCollide, d.CanQuery, d.CanTouch, d.CastShadow, d.Massless, d.Anchored = false, false, false, false, true, false
+			d.Material = Enum.Material.Neon
+			d.Color = th.b
+			d.Transparency = 1
+			if d:IsA("MeshPart") then pcall(function() d.TextureID = "" end) end
+			table.insert(parts, d)
+		end
+	end
+	avRoot.Anchored = true
+	av.PrimaryPart = avRoot
+	av.Name = "UltAvatar"
+	av.Parent = folder
+	local S = 5
+	pcall(function() av:ScaleTo(S) end)
+	local emitters = {}
+	if VTX.aura then
+		for _, nm in {"UpperTorso", "LowerTorso", "RightUpperArm", "LeftUpperArm", "Head", "Torso"} do
+			local bp = av:FindFirstChild(nm)
+			if bp then
+				table.insert(emitters, ULT.emit(bp, {Texture = VTX.aura, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+					LightEmission = 0.7, Color = ColorSequence.new(th.b, th.c), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 3), NumberSequenceKeypoint.new(1, 6)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.5), NumberSequenceKeypoint.new(1, 1)}),
+					Lifetime = NumberRange.new(0.6, 0.9), Rate = 8, Speed = NumberRange.new(4, 8), EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(15, 15)}))
+			end
+		end
+	end
+	if VTX.lightningFlip then
+		local bp = av:FindFirstChild("UpperTorso") or av:FindFirstChild("Torso") or avRoot
+		table.insert(emitters, ULT.emit(bp, {Texture = VTX.lightningFlip, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.Random,
+			Color = ColorSequence.new(th.a), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 9, 3), NumberSequenceKeypoint.new(1, 11, 3)}), Transparency = NumberSequence.new(0, 0.5),
+			Lifetime = NumberRange.new(0.1, 0.18), Rate = 14, Speed = NumberRange.new(0), Rotation = NumberRange.new(-180, 180)}))
+	end
+	task.delay(5.2, function() for _, e in emitters do e.Enabled = false end end)
+	if VTX.smokeFlip then
+		local cl = part(Vector3.new(40, 6, 40), CFrame.new(center + Vector3.new(0, 42, 0)), th.c, {Transparency = 1})
+		local sm = ULT.emit(cl, {Texture = VTX.smokeFlip, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+			LightEmission = 0, LightInfluence = 0.3, Color = ColorSequence.new(Color3.fromRGB(35, 38, 62), Color3.fromRGB(80, 95, 140)),
+			Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 14, 4), NumberSequenceKeypoint.new(1, 22, 4)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.15), NumberSequenceKeypoint.new(0.8, 0.3), NumberSequenceKeypoint.new(1, 1)}),
+			Lifetime = NumberRange.new(1.8, 2.6), Rate = 26, Speed = NumberRange.new(1, 3), Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-20, 20)})
+		sm:Emit(20)
+		local lf
+		if VTX.lightningFlip then
+			lf = ULT.emit(cl, {Texture = VTX.lightningFlip, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.Random,
+				Color = ColorSequence.new(th.a), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 12, 4), NumberSequenceKeypoint.new(1, 12, 4)}), Transparency = NumberSequence.new(0, 0.6),
+				Lifetime = NumberRange.new(0.1, 0.16), Rate = 7, Speed = NumberRange.new(0), Rotation = NumberRange.new(-180, 180), ZOffset = 1})
+		end
+		task.delay(5.4, function() sm.Enabled = false if lf then lf.Enabled = false end end)
+		Debris:AddItem(cl, 8.5)
+	end
+	local hl = Instance.new("Highlight")
+	hl.FillColor, hl.OutlineColor = th.b, th.a
+	hl.FillTransparency, hl.OutlineTransparency = 1, 1
+	hl.DepthMode = Enum.HighlightDepthMode.Occluded
+	hl.Parent = av
+	tween(hl, 0.9, {FillTransparency = 1, OutlineTransparency = 0.15})
+	for _, p in parts do
+		if p ~= avRoot then tween(p, 0.9, {Transparency = 0.6}) end
+	end
+	-- joints to mirror (player's Transform -> avatar, translations scaled up)
+	local pairs_ = {}
+	for _, j in char:GetDescendants() do
+		if (j:IsA("Motor6D") or j:IsA("AnimationConstraint")) and j.Parent then
+			local holder = av:FindFirstChild(j.Parent.Name, true)
+			local twin = holder and holder:FindFirstChild(j.Name)
+			if twin and (twin:IsA("Motor6D") or twin:IsA("AnimationConstraint")) then table.insert(pairs_, {j, twin}) end
+		end
+	end
+	local h0 = root.Position.Y - g.Y
+	local back = -root.CFrame.LookVector
+	local rot = root.CFrame - root.Position
+	local finalPos = g + back * 9 + Vector3.new(0, h0 * S - S * 1.6, 0)
+	local startPos = finalPos - Vector3.new(0, h0 * S * 1.5, 0)
+	local t0 = os.clock()
+	local con
+	local nextBolt = 0
+	con = RunS.RenderStepped:Connect(function()
+		local t = os.clock() - t0
+		if not av.Parent or t > 6.4 then con:Disconnect() return end
+		local u = math.clamp(t / 1.3, 0, 1)
+		u = 1 - (1 - u) ^ 3
+		local bob = math.sin(t * 2.2) * 0.4
+		avRoot.CFrame = rot + startPos:Lerp(finalPos, u) + Vector3.new(0, bob, 0)
+		for _, pr in pairs_ do
+			if pr[1].Parent and pr[2].Parent then
+				local tr = pr[1].Transform
+				pr[2].Transform = CFrame.new(tr.Position * S) * tr.Rotation
+			end
+		end
+		-- lightning crawling over the avatar
+		if t > 0.6 and t < 5.6 and os.clock() > nextBolt then
+			nextBolt = os.clock() + 0.12
+			local a, b = parts[math.random(1, #parts)], parts[math.random(1, #parts)]
+			if a.Parent and b.Parent and (a.Position - b.Position).Magnitude > 2 then bolt(a.Position, b.Position, 2.5, 0.25, 0.15, th, false) end
+		end
+	end)
+	-- the avatar's cleave throws a giant bolt from its blade into the target
+	task.delay(ULT.LEAD, function()
+		if not av.Parent then return end
+		local tip = bladeTip(av)
+		bolt(tip, center, 7, 1.4, 0.7, th, true)
+		task.delay(0.08, function() bolt(tip + Vector3.new(3, 0, 0), center, 9, 0.8, 0.6, th, true) end)
+		burst(center + Vector3.new(0, 2, 0), th.a, 60, 55, 1.4, VTX.spark, 0.8)
+		ring(center + Vector3.new(0, 0.4, 0), 16, th.b, 0.6, 0.6, 0.1)
+		light(center + Vector3.new(0, 8, 0), th.b, 18, 80, 0.7)
+		if VTX.frost then ULT.disc(ground(center) + Vector3.new(0, 0.15, 0), 32, VTX.frost, th.b, 1.2, {bright = 4, grow = {6, 0.25}, fadeIn = 0.05, fadeOut = 1}) end
+		ULT.flash(center + Vector3.new(0, 3, 0), th.a, 34, 0.6)
+		ULT.shock(center + Vector3.new(0, 0.3, 0), 40, th.b, 0.7)
+	end)
+	task.delay(5.5, function()
+		if not av.Parent then return end
+		tween(hl, 0.7, {FillTransparency = 1, OutlineTransparency = 1})
+		for _, p in parts do if p.Parent then tween(p, 0.7, {Transparency = 1}) end end
+		Debris:AddItem(av, 0.8)
+	end)
+end
+
+-- 领域: the world drains of colour and stops, snow hangs frozen in the air, then one cut splits the sky
+function ULT.Ice(plr, th, center)
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local g = ground(root.Position)
+	local cc = Instance.new("ColorCorrectionEffect")
+	cc.Name = "UltDomain"
+	cc.Parent = Lighting
+	tween(cc, 0.8, {Saturation = -0.6, Contrast = 0.1, Brightness = 0.06, TintColor = Color3.fromRGB(215, 232, 255)})
+	task.delay(5.6, function()
+		tween(cc, 0.8, {Saturation = 0, Contrast = 0, Brightness = 0, TintColor = Color3.new(1, 1, 1)})
+		Debris:AddItem(cc, 0.9)
+	end)
+	ULT.array(g, 16, th, "Ice", 5.5)
+	if VTX.frost then ULT.disc(g + Vector3.new(0, 0.12, 0), 44, VTX.frost, th.a, 5.2, {bright = 2.5, grow = {4, 1.4}, fadeOut = 0.8}) end
+	if VTX.snow then -- snow frozen mid-air all around
+		local box = part(Vector3.new(56, 24, 56), CFrame.new(root.Position + Vector3.new(0, 9, 0)), th.a, {Transparency = 1})
+		ULT.emit(box, {Texture = VTX.snow, LightEmission = 0.6, Color = ColorSequence.new(th.a), Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.9, 0.4), NumberSequenceKeypoint.new(1, 0.9, 0.4)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.08, 0.05), NumberSequenceKeypoint.new(0.9, 0.1), NumberSequenceKeypoint.new(1, 1)}),
+			Lifetime = NumberRange.new(5, 5.4), Speed = NumberRange.new(0), Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-15, 15)}):Emit(140)
+		if VTX.glow then
+			ULT.emit(box, {Texture = VTX.glow, Color = ColorSequence.new(th.b), Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+				Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.4, 0.6), NumberSequenceKeypoint.new(1, 1.4, 0.6)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.1, 0.3), NumberSequenceKeypoint.new(0.9, 0.4), NumberSequenceKeypoint.new(1, 1)}),
+				Lifetime = NumberRange.new(5, 5.4), Speed = NumberRange.new(0)}):Emit(60)
+		end
+		Debris:AddItem(box, 6)
+	end
+	for _ = 1, VTX.snow and 0 or 80 do
+		local p0 = root.Position + Vector3.new((math.random() - 0.5) * 56, math.random() * 24 - 2, (math.random() - 0.5) * 56)
+		local s = 0.15 + math.random() * 0.3
+		local p = part(Vector3.one * s, CFrame.new(p0 + Vector3.new(0, 4, 0)), th.a, {Shape = Enum.PartType.Ball, Transparency = 1})
+		tween(p, 1.1, {CFrame = CFrame.new(p0), Transparency = 0.05}, Enum.EasingStyle.Quart)
+		fade(p, 0.6, 5.2)
+	end
+	-- frost creeping out over the ground
+	for i = 1, 14 do
+		task.delay(0.6 + i * 0.08, function()
+			local a = math.random() * math.pi * 2
+			local p = ground(g + Vector3.new(math.cos(a), 0, math.sin(a)) * (4 + math.random() * 12))
+			iceSpike(p, Vector3.new(math.cos(a), 0, math.sin(a)), 1.5 + math.random() * 2.5, th, 4.4)
+		end)
+	end
+	-- an ice formation opens in the sky over the target; the giant blade falls through it
+	task.delay(2.3, function() ULT.array(center, 12, th, "Ice", 2.6, 58) end)
+	task.delay(ULT.LEAD, function()
+		local flat = center - root.Position
+		flat = Vector3.new(flat.X, 0, flat.Z)
+		local dir = flat.Magnitude > 0.1 and flat.Unit or root.CFrame.LookVector
+		local cf = CFrame.lookAt(g, g + dir)
+		-- the sky splits: a hair-thin line of light from the clouds to the ground that tears open
+		local crack = part(Vector3.new(0.2, 1, 0.2), cf * CFrame.new(0, 60, -36), th.a, {Transparency = 0})
+		local halo = part(Vector3.new(0.2, 1, 0.2), crack.CFrame, th.b, {Transparency = 0.5})
+		tween(crack, 0.12, {Size = Vector3.new(0.5, 200, 0.5)})
+		tween(halo, 0.12, {Size = Vector3.new(2, 200, 2)})
+		task.delay(0.15, function()
+			tween(crack, 0.5, {Size = Vector3.new(5, 200, 0.6), Transparency = 0.2})
+			tween(halo, 0.5, {Size = Vector3.new(18, 200, 2), Transparency = 0.85})
+			fade(crack, 0.6, 0.6)
+			fade(halo, 0.6, 0.5)
+		end)
+		-- a wall of cutting light races from the caster to the target
+		local wave = part(Vector3.new(26, 18, 0.3), cf * CFrame.new(0, 9, -2), th.a, {Transparency = 0.2})
+		local waveGlow = part(Vector3.new(34, 24, 0.3), wave.CFrame, th.b, {Transparency = 0.6})
+		local dist = math.max(8, flat.Magnitude)
+		tween(wave, 0.3, {CFrame = cf * CFrame.new(0, 9, -dist), Size = Vector3.new(40, 2, 0.1), Transparency = 0.6})
+		tween(waveGlow, 0.3, {CFrame = cf * CFrame.new(0, 9, -dist), Size = Vector3.new(50, 4, 0.1)})
+		fade(wave, 0.2, 0.3)
+		fade(waveGlow, 0.2, 0.3)
+		if VTX.crescent then
+			wave.Transparency, waveGlow.Transparency = 1, 1
+			for k = 0, 1 do
+				local c0 = cf * CFrame.new(0, 9, -2) * CFrame.Angles(0, k * math.pi / 2, k == 0 and 0 or math.pi / 2)
+				local c, ims = ULT.card(c0, 30, 15, VTX.crescent, k == 0 and th.a or th.b, 0.5, 4)
+				tween(c, 0.32, {CFrame = cf * CFrame.new(0, 9, -dist) * CFrame.Angles(0, k * math.pi / 2, k == 0 and 0 or math.pi / 2), Size = Vector3.new(52, 26, 0.05)}, Enum.EasingStyle.Quart)
+			end
+		end
+		ULT.flash(center + Vector3.new(0, 2, 0), th.a, 40, 0.7)
+		ULT.shock(center + Vector3.new(0, 0.3, 0), 46, th.b, 0.8)
+		screenFlash(th.a, 0.35)
+	end)
+end
+
+-- 莲台 + 万剑: a giant lotus throne blooms under the caster, petal-swords gather in three halos, then rain onto the target
+function ULT.Lotus(plr, th, center)
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local tool = char and char:FindFirstChildOfClass("Tool")
+	local h = tool and tool:FindFirstChild("Handle")
+	if not (root and h) then return end
+	local g = ground(root.Position)
+	if VTX.lotus then -- giant lotus throne opening under the caster
+		ULT.disc(g + Vector3.new(0, 0.35, 0), 22, VTX.lotus, Color3.new(1, 1, 1), 5.4, {spin = 8, bright = 1.1, grow = {1, 1.2}})
+		ULT.disc(g + Vector3.new(0, 0.55, 0), 11, VTX.lotus, Color3.new(1, 0.96, 0.98), 5.4, {spin = -14, bright = 1.4, grow = {0.5, 1.5}, transp = 0.1})
+	else
+		lotus(g + Vector3.new(0, 0.4, 0), 9, th, 5.6, 0.9)
+	end
+	ULT.array(g, 14, th, "Lotus", 5.6)
+	if VTX.petal then
+		local plate = part(Vector3.new(34, 1, 34), CFrame.new(g + Vector3.new(0, 1, 0)), th.b, {Transparency = 1})
+		local pe = ULT.emit(plate, {Texture = VTX.petal, LightEmission = 0, LightInfluence = 0.4, Color = ColorSequence.new(Color3.new(1, 1, 1)),
+			Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1.1, 0.3), NumberSequenceKeypoint.new(1, 0.9, 0.3)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.1, 0), NumberSequenceKeypoint.new(0.85, 0.1), NumberSequenceKeypoint.new(1, 1)}),
+			Lifetime = NumberRange.new(3, 4), Rate = 15, Speed = NumberRange.new(5, 9), EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(35, 35),
+			Acceleration = Vector3.new(0, 0.6, 0), Drag = 0.4, Rotation = NumberRange.new(0, 360), RotSpeed = NumberRange.new(-120, 120)})
+		pe.Enabled = false
+		task.delay(1.3, function() pe.Enabled = true end) -- after the close-up so petals never fill the lens
+		task.delay(5, function() pe.Enabled = false end)
+		Debris:AddItem(plate, 9)
+	else
+		petalStorm(g, 8, 30, 5, th, 9)
+	end
+	-- the blade piece of the caster's sword is the template for every flying sword
+	local best, bm
+	for _, d in tool:GetDescendants() do
+		if d:IsA("BasePart") and d ~= h and d.Transparency < 1 and (not bm or d.Size.Magnitude > bm) then best, bm = d, d.Size.Magnitude end
+	end
+	if not best then return end
+	local tipAxis = best.CFrame:PointToObjectSpace(bladeTip(char))
+	tipAxis = tipAxis.Magnitude > 0.01 and tipAxis.Unit or Vector3.yAxis
+	local align = CFrame.fromRotationBetweenVectors(tipAxis, -Vector3.zAxis)
+	local swords = {}
+	for ringI = 1, 3 do
+		local n = 4 + ringI * 3
+		for i = 1, n do
+			local s = best:Clone()
+			for _, ch in s:GetChildren() do ch:Destroy() end
+			s.Anchored, s.CanCollide, s.CanQuery, s.CanTouch, s.CastShadow = true, false, false, false, false
+			s.Material = Enum.Material.Neon
+			s.Color = (i % 3 == 0) and th.c or th.b
+			s.Size = best.Size * 0.75
+			s.Transparency = 1
+			s.Parent = folder
+			local at = Instance.new("Attachment") at.Position = Vector3.new(0, 0, 0) at.Parent = s
+			local a2 = Instance.new("Attachment") a2.Position = tipAxis * 0.4 a2.Parent = s
+			local tr = Instance.new("Trail")
+			tr.Attachment0, tr.Attachment1 = at, a2
+			tr.Color = ColorSequence.new(th.a, th.b)
+			tr.LightEmission = 0.5
+			tr.Lifetime = 0.25
+			tr.Transparency = NumberSequence.new(0.3, 1)
+			tr.WidthScale = NumberSequence.new(1, 0)
+			tr.Parent = s
+			tween(s, 0.4, {Transparency = 0.3})
+			local ra, rr = math.random() * math.pi * 2, 4 + math.random() * 15
+			local hit = ground(center + Vector3.new(math.cos(ra) * rr, 0, math.sin(ra) * rr))
+			table.insert(swords, {s = s, ring = ringI, a = (i / n) * math.pi * 2, delay = math.random() * 0.25, hit = hit})
+		end
+	end
+	local t0 = os.clock()
+	local con
+	con = RunS.RenderStepped:Connect(function()
+		local t = os.clock() - t0
+		if t > ULT.LEAD + 1 then con:Disconnect() return end
+		for _, w in swords do
+			if w.s.Parent and not w.fired then
+				local r = 3.5 + w.ring * 2.4
+				local hgt = 2 + w.ring * 2.6 + math.min(t, 1.5) * 2
+				local a = w.a + t * (w.ring % 2 == 0 and -1.4 or 1.1)
+				local pos = g + Vector3.new(math.cos(a) * r, hgt, math.sin(a) * r)
+				local aimW = math.clamp((t - 3.0) / 0.5, 0, 1)
+				local tangent = Vector3.new(-math.sin(a), 0.35, math.cos(a))
+				local toTarget = (w.hit - pos)
+				local dir = tangent.Unit:Lerp(toTarget.Unit, aimW)
+				w.s.CFrame = CFrame.lookAt(pos, pos + dir) * align
+				w.pos, w.dir = pos, dir
+			end
+		end
+	end)
+	task.delay(ULT.LEAD, function()
+		for i, w in swords do
+			task.delay(w.delay + (i % 6) * 0.03, function()
+				if not w.s.Parent or not w.pos then return end
+				w.fired = true
+				local hit = w.hit
+				local from = w.pos
+				local look = (hit - from).Unit
+				tween(w.s, 0.22, {CFrame = CFrame.lookAt(hit - look * 1.5, hit) * align}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+				task.delay(0.22, function()
+					burst(hit + Vector3.new(0, 0.5, 0), th.a, 8, 18, 0.5, VTX.spark, 0.4)
+					if VTX.petal then
+						burst(hit + Vector3.new(0, 0.5, 0), Color3.new(1, 1, 1), 6, 14, 1.2, VTX.petal, 0.7)
+						if i % 6 == 0 then ULT.flash(hit + Vector3.new(0, 1, 0), th.b, 7, 0.3) end
+					else
+						local p = petal(CFrame.new(hit + Vector3.new(0, 0.3, 0)) * CFrame.Angles(0, math.random() * 6.28, 0), 2.4, th.b, 0.1)
+						p.Material = Enum.Material.Neon
+						fade(p, 0.5, 0.3)
+					end
+					fade(w.s, 0.4, 0.5)
+				end)
+			end)
+		end
+	end)
+end
+
+-- 龙魂: a jade dragon spirit with overlapping scales, gold fins, mane and an opening jaw
+function ULT.dragon(scale, th)
+	local segs = {}
+	local n = 26
+	for i = 1, n do
+		local s = scale * (1.15 - (i / n) * 0.8)
+		local body = meshed(Vector3.new(s * 0.95, s * 0.85, s * 1.7), CFrame.new(0, -500, 0), th.b, {Material = Enum.Material.Glass, Transparency = 0.3, Reflectance = 0.15})
+		local core = meshed(Vector3.new(s * 0.45, s * 0.4, s * 1.4), CFrame.new(0, -500, 0), th.a, {Transparency = 0.2})
+		local fin = Instance.new("WedgePart")
+		fin.Anchored, fin.CanCollide, fin.CanQuery, fin.CanTouch, fin.CastShadow = true, false, false, false, false
+		fin.Material = Enum.Material.Neon
+		fin.Color = th.c
+		fin.Size = Vector3.new(s * 0.1, s * 0.55, s * 0.9)
+		fin.Parent = folder
+		local belly = meshed(Vector3.new(s * 0.6, s * 0.3, s * 1.5), CFrame.new(0, -500, 0), th.c, {Transparency = 0.25})
+		table.insert(segs, {body = body, core = core, fin = fin, belly = belly, s = s})
+	end
+	local hs = scale * 1.45
+	local head = meshed(Vector3.new(hs, hs * 0.75, hs * 1.4), CFrame.new(0, -500, 0), th.b, {Material = Enum.Material.Glass, Transparency = 0.15, Reflectance = 0.15})
+	local snout = meshed(Vector3.new(hs * 0.7, hs * 0.4, hs * 1.1), CFrame.new(0, -500, 0), th.b, {Material = Enum.Material.Glass, Transparency = 0.15})
+	local jaw = meshed(Vector3.new(hs * 0.6, hs * 0.22, hs * 1.0), CFrame.new(0, -500, 0), th.b, {Material = Enum.Material.Glass, Transparency = 0.2})
+	local glowMouth = meshed(Vector3.new(hs * 0.45, hs * 0.2, hs * 0.8), CFrame.new(0, -500, 0), th.a, {Transparency = 0.1})
+	local horns, whiskers, mane = {}, {}, {}
+	for k = 1, 2 do
+		table.insert(horns, part(Vector3.new(hs * 0.12, hs * 0.12, hs * 1.3), CFrame.new(0, -500, 0), th.c))
+		table.insert(whiskers, part(Vector3.new(hs * 0.05, hs * 0.05, hs * 1.8), CFrame.new(0, -500, 0), th.a, {Transparency = 0.2}))
+	end
+	for k = 1, 7 do
+		table.insert(mane, part(Vector3.new(hs * 0.08, hs * 0.08, hs * (0.9 + (k % 3) * 0.3)), CFrame.new(0, -500, 0), k % 2 == 0 and th.a or th.c, {Transparency = 0.15}))
+	end
+	local eyes = {}
+	for k = 1, 2 do
+		table.insert(eyes, part(Vector3.one * hs * 0.17, CFrame.new(0, -500, 0), Color3.fromRGB(255, 240, 160), {Shape = Enum.PartType.Ball}))
+	end
+	local all = {head, snout, jaw, glowMouth}
+	for _, list in {horns, whiskers, mane, eyes} do for _, p in list do table.insert(all, p) end end
+	for _, sg in segs do
+		for _, p in {sg.body, sg.core, sg.fin, sg.belly} do table.insert(all, p) end
+	end
+	-- qi mist trailing from the body
+	for i = 3, n, 6 do
+		local a0 = Instance.new("Attachment") a0.Position = Vector3.new(0, segs[i].s * 0.4, 0) a0.Parent = segs[i].body
+		local a1 = Instance.new("Attachment") a1.Position = Vector3.new(0, -segs[i].s * 0.4, 0) a1.Parent = segs[i].body
+		local tr = Instance.new("Trail")
+		tr.Attachment0, tr.Attachment1 = a0, a1
+		tr.Color = ColorSequence.new(th.a, th.b)
+		tr.LightEmission = 1
+		tr.Lifetime = 0.45
+		tr.Transparency = NumberSequence.new(0.5, 1)
+		tr.Parent = segs[i].body
+	end
+	local d = {all = all, open = 0, segs = segs, head = head}
+	function d.place(path, t, spacing)
+		local hp = path(t)
+		local look = hp - path(t - spacing * 0.5)
+		if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) end
+		local hcf = CFrame.lookAt(hp, hp + look.Unit)
+		local open = math.rad(35 * d.open)
+		head.CFrame = hcf
+		snout.CFrame = hcf * CFrame.new(0, hs * 0.02, -hs * 0.95) * CFrame.Angles(open * -0.3, 0, 0)
+		jaw.CFrame = hcf * CFrame.new(0, -hs * 0.28, -hs * 0.3) * CFrame.Angles(-open, 0, 0) * CFrame.new(0, 0, -hs * 0.55)
+		glowMouth.CFrame = hcf * CFrame.new(0, -hs * 0.12, -hs * 0.75)
+		glowMouth.Transparency = 0.1 + 0.8 * (1 - d.open)
+		for k, sgn in {-1, 1} do
+			horns[k].CFrame = hcf * CFrame.new(sgn * hs * 0.28, hs * 0.42, hs * 0.45) * CFrame.Angles(math.rad(28), math.rad(sgn * 18), 0) * CFrame.new(0, 0, hs * 0.4)
+			whiskers[k].CFrame = hcf * CFrame.new(sgn * hs * 0.32, -hs * 0.05, -hs * 1.2) * CFrame.Angles(math.rad(-10 + math.sin(os.clock() * 4 + k) * 12), math.rad(sgn * 35), 0) * CFrame.new(0, 0, hs * 0.85)
+			eyes[k].CFrame = hcf * CFrame.new(sgn * hs * 0.3, hs * 0.16, -hs * 0.45)
+		end
+		for k, m in mane do
+			local side = (k - 4) / 3
+			m.CFrame = hcf * CFrame.new(side * hs * 0.45, hs * 0.3, hs * 0.55) * CFrame.Angles(math.rad(35 + math.sin(os.clock() * 5 + k) * 10), math.rad(side * 40), 0) * CFrame.new(0, 0, hs * 0.5)
+		end
+		for i, sg in segs do
+			local p = path(t - spacing * i)
+			local lk = p - path(t - spacing * i - spacing * 0.5)
+			local cf = lk.Magnitude > 0.01 and CFrame.lookAt(p, p + lk.Unit) or CFrame.new(p)
+			sg.body.CFrame = cf
+			sg.core.CFrame = cf
+			sg.belly.CFrame = cf * CFrame.new(0, -sg.s * 0.3, 0)
+			sg.fin.CFrame = cf * CFrame.new(0, sg.s * 0.62, 0)
+		end
+	end
+	function d.fade(t)
+		for _, p in all do fade(p, t) end
+	end
+	return d
+end
+
+function ULT.Jade(plr, th, center)
+	local char = plr.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then return end
+	local g = ground(root.Position)
+	ULT.recent.Jade = os.clock()
+	ULT.array(g, 15, th, "Jade", 5.6)
+	local d = ULT.dragon(3.2, th)
+	if VTX.swirl then ULT.disc(g + Vector3.new(0, 0.2, 0), 26, VTX.swirl, th.b, 3.6, {spin = 140, bright = 3, grow = {4, 1}}) end
+	local dEm = {}
+	if VTX.aura then
+		for i = 1, #d.segs, 4 do
+			table.insert(dEm, ULT.emit(d.segs[i].body, {Texture = VTX.aura, FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4, FlipbookMode = Enum.ParticleFlipbookMode.OneShot,
+				Color = ColorSequence.new(th.a, th.b), Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 2), NumberSequenceKeypoint.new(1, 5)}), Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.2, 0.35), NumberSequenceKeypoint.new(1, 1)}),
+				Lifetime = NumberRange.new(0.4, 0.7), Rate = 14, Speed = NumberRange.new(1, 3), SpreadAngle = Vector2.new(180, 180)}))
+		end
+	end
+	if VTX.glow then
+		table.insert(dEm, ULT.emit(d.head, {Texture = VTX.glow, Color = ColorSequence.new(th.a), Size = NumberSequence.new(9, 4), Transparency = NumberSequence.new(0.3, 1),
+			Lifetime = NumberRange.new(0.25), Rate = 30, Speed = NumberRange.new(0)}))
+	end
+	local top = g + Vector3.new(0, 26, 0)
+	local landing = center + Vector3.new(0, 2, 0)
+	-- one continuous path over time: hidden under the caster -> coils up around them -> rears at the top -> spirals down on the target
+	local function path(t)
+		if t < 1.2 then
+			return g + Vector3.new(0, -20 + t * 10, 0)
+		elseif t < 3.5 then
+			local u = (t - 1.2) / 2.3
+			local a = u * 2.3 * math.pi * 2
+			local r = 6 - u * 1.5
+			return g + Vector3.new(math.cos(a) * r, -8 + u * 34, math.sin(a) * r)
+		elseif t < ULT.LEAD then
+			local u = (t - 3.5) / (ULT.LEAD - 3.5)
+			local a = 2.3 * math.pi * 2
+			local r = 4.5
+			return g + Vector3.new(math.cos(a) * r, 26 + u * 2, math.sin(a) * r)
+		else
+			local u = math.min(1, (t - ULT.LEAD) / 1.8)
+			local a0 = 2.3 * math.pi * 2
+			local startP = g + Vector3.new(math.cos(a0) * 4.5, 28, math.sin(a0) * 4.5)
+			local base = startP:Lerp(landing, u ^ 1.4)
+			local r = 12 * math.sin(u * math.pi) * (1 - u * 0.5)
+			local a = a0 + u * 3 * math.pi * 2
+			return base + Vector3.new(math.cos(a) * r, math.sin(u * math.pi) * 6, math.sin(a) * r)
+		end
+	end
+	local t0 = os.clock()
+	local roared = false
+	animate(ULT.LEAD + 1.9, function()
+		local t = os.clock() - t0
+		d.open = (t > 3.2 and t < 3.9) and math.sin((t - 3.2) / 0.7 * math.pi) or 0
+		if t > 3.3 and not roared then
+			roared = true
+			local hp = path(t)
+			ring(hp, 14, th.a, 0.6, 0.4, 0.2)
+			burst(hp, th.a, 40, 40, 1, nil, 0.6)
+			light(hp, th.b, 12, 60, 0.6)
+		end
+		d.place(path, t, 0.035)
+	end, function()
+		burst(landing, th.a, 70, 60, 1.5, VTX.spark, 0.9)
+		for _, e in dEm do e.Enabled = false end
+		ULT.flash(landing, th.a, 40, 0.7)
+		ULT.shock(center + Vector3.new(0, 0.3, 0), 44, th.b, 0.8)
+		if VTX.swirl then ULT.disc(center + Vector3.new(0, 0.25, 0), 36, VTX.swirl, th.a, 1.1, {spin = 220, bright = 3.5, grow = {6, 0.4}, fadeOut = 0.6}) end
+		ring(center + Vector3.new(0, 0.4, 0), 20, th.b, 0.7, 0.6, 0.1)
+		light(center + Vector3.new(0, 6, 0), th.b, 18, 80, 0.7)
+		screenFlash(th.a, 0.3)
+		d.fade(0.4)
+	end)
+end
+
 -- ===================== efek dari server =====================
 local FX = {}
 
-function FX.UltStart(plr, el)
+function FX.UltStart(plr, el, center)
+	ultCaster[el] = plr
 	local c = plr.Character
 	local root = c and c:FindFirstChild("HumanoidRootPart")
 	if not root or not near(root.Position) then return end
 	local th = THEME[el]
-	darkSky(th.c:Lerp(Color3.new(1, 1, 1), 0.55), 5)
+	darkSky(th.c:Lerp(Color3.new(1, 1, 1), 0.55), 6)
+	if typeof(center) == "Vector3" and ULT[el] then task.spawn(ULT[el], plr, th, center) end
 	-- aura naik di sekitar pemain
 	ring(root.Position - Vector3.new(0, 2.8, 0), 10, th.b, 0.8, 0.25)
 	local col = part(Vector3.new(60, 6, 6), CFrame.new(root.Position + Vector3.new(0, 28, 0)) * CFrame.Angles(0, 0, math.rad(90)), th.a, {Shape = Enum.PartType.Cylinder, Transparency = 0.6})
@@ -823,7 +1808,23 @@ function FX.IceSword(center, radius)
 	e.Parent = snow
 	task.delay(3.5, function() e.Enabled = false end)
 	Debris:AddItem(snow, 8)
-	-- pedang es raksasa
+	-- pedang es raksasa: salinan roh dari pedang si pemakai
+	local function landed()
+		burst(center + Vector3.new(0, 1, 0), th.a, 60, 50, 1.3, nil, 0.8)
+		ring(center + Vector3.new(0, 0.4, 0), radius, th.a, 0.5, 0.6, 0.1)
+		ring(center + Vector3.new(0, 0.6, 0), radius * 1.3, th.b, 0.8, 0.4, 0.4)
+		light(center + Vector3.new(0, 6, 0), th.b, 16, 60, 0.6)
+		screenFlash(th.a, 0.3)
+		-- kristal es tumbuh di area
+		for i = 1, 18 do
+			task.delay(i * 0.02, function()
+				local a = math.random() * math.pi * 2
+				local p = ground(center + Vector3.new(math.cos(a), 0, math.sin(a)) * radius * (0.25 + math.random() * 0.75))
+				iceSpike(p, Vector3.new(math.cos(a), 0, math.sin(a)), 3 + math.random() * 5, th, 1.4)
+			end)
+		end
+	end
+	if spiritBlade("Ice", center, 34, th, 0.75, 1.4, landed) then return end
 	local L = 34
 	local top = center + Vector3.new(0, 80, 0)
 	local blade = part(Vector3.new(L, 1.2, 6), CFrame.new(top) * CFrame.Angles(0, 0, math.rad(90)), th.b, {Material = Enum.Material.Glass, Transparency = 0.15, Reflectance = 0.3})
@@ -999,6 +2000,9 @@ end
 function FX.DragonDescend(center, radius, dur)
 	if not near(center) then return end
 	local th = THEME.Jade
+	local r1 = part(Vector3.new(0.12, radius * 2.2, radius * 2.2), CFrame.new(center + Vector3.new(0, 0.15, 0)) * FLAT, th.b, {Shape = Enum.PartType.Cylinder, Transparency = 0.7})
+	fade(r1, 0.4, dur)
+	if os.clock() - (ULT.recent.Jade or -99) < 8 then return end -- the jade dragon set piece already dives in
 	local d = makeDragon(4, th)
 	local laps = 1.6
 	local path = function(t)
@@ -1012,8 +2016,6 @@ function FX.DragonDescend(center, radius, dur)
 	animate(dur, function(k)
 		d.place(path, k, spacing)
 	end, function() d.fade(0.4) end)
-	local r1 = part(Vector3.new(0.12, radius * 2.2, radius * 2.2), CFrame.new(center + Vector3.new(0, 0.15, 0)) * FLAT, th.b, {Shape = Enum.PartType.Cylinder, Transparency = 0.7})
-	fade(r1, 0.4, dur)
 end
 
 function FX.JadeImpact(center, radius)
