@@ -357,9 +357,21 @@ const camera: CamKey[] = [
 	// S12 46.5-47.6: tusukan, dari samping (Bai di kiri layar, Sosok di kanan)
 	{ t: 46.5, pos: v(9, 39.8, -38.5), look: v(-1.5, 39.2, -38.5), fov: 55, cut: true },
 	{ t: 47.6, pos: v(7.2, 39.7, -39.8), look: v(-1.47, 39.45, -40.8), fov: 46, ease: "out" },
-	// S13 47.6-54: close-up ujung pedang dijepit dua jari, dari sisi luar tangan (jubah Sosok blur di belakang). Hening
-	{ t: 47.6, pos: PINCH.add(v(-2.3, 0.45, 1.5)), look: PINCH, fov: 24, dof: 0.8, cut: true },
-	{ t: 54, pos: PINCH.add(v(-1.75, 0.35, 1.15)), look: PINCH, fov: 18, dof: 0.8, ease: "inOut" },
+	// S13 47.6-54: waktu berhenti, hening. Dipecah 4 shot biar jelas (dulu 1 close-up panjang: jari hitam di depan
+	// jubah hitam, gak kebaca). Pas tiap bunyi retak, shot ganti
+	// 13a: jepitan dari samping (tegak lurus jari): tangan giok pucat keluar dari lengan jubah hitam (kiri layar),
+	// ujung pedang di antara telunjuk dan jari tengah, bilah ke kanan, retakan ruang di belakangnya
+	{ t: 47.6, pos: PINCH.add(v(-3.4, 0.25, 0.35)), look: PINCH.add(v(0.15, 0, -0.2)), fov: 30, dof: 0.3, cut: true },
+	{ t: 49.45, pos: PINCH.add(v(-2.9, 0.2, 0.3)), look: PINCH.add(v(0.15, 0, -0.2)), fov: 27, dof: 0.3, ease: "inOut" },
+	// 13b: wajah Bai Wuji membeku di tengah tusukan
+	{ t: 49.45, follow: "bai", pos: v(-1.5, 1.7, -2.9), track: "bai", look: v(0.05, 1.5, -0.3), fov: 34, dof: 0.4, cut: true },
+	{ t: 51.4, follow: "bai", pos: v(-1.3, 1.65, -2.5), track: "bai", look: v(0.05, 1.5, -0.3), fov: 32, dof: 0.4, ease: "inOut" },
+	// 13c: bullet time, kamera muter pelan di samping dua tokoh yang membeku, retakan ruang melebar
+	{ t: 51.4, pos: v(7.6, 40.4, -36.4), look: v(-1.6, 39.3, -39.2), fov: 42, cut: true },
+	{ t: 52.75, pos: v(6.4, 41.2, -43.2), look: v(-1.6, 39.3, -39.8), fov: 40, ease: "inOut" },
+	// 13d: balik ke jepitan, makin dekat, bilah gemetar sebelum patah
+	{ t: 52.75, pos: PINCH.add(v(-2.6, 0.18, 0.25)), look: PINCH.add(v(0.1, 0, -0.15)), fov: 24, dof: 0.3, cut: true },
+	{ t: 54, pos: PINCH.add(v(-2.2, 0.15, 0.2)), look: PINCH.add(v(0.1, 0, -0.15)), fov: 20, dof: 0.3, ease: "in" },
 	// S14 54-60: pedang patah, terpental, jatuh
 	{ t: 54, pos: v(-22, 30, -10), look: v(0, 30, -25), fov: 65, cut: true },
 	{ t: 56.5, pos: v(-14, 8, 30), look: v(0, 3, 12), fov: 60, ease: "out" },
@@ -556,6 +568,9 @@ const events: CutEvent[] = [
 	{ t: 46.75, kind: "pose", actor: "figure", pose: "twoFinger", dur: 0.15, ease: "out" },
 	{ t: 46.95, kind: "still", actor: "bai", on: true },
 	{ t: 47, kind: "impact", strength: 1.4 },
+	// Tangan balok R15 diganti tangan giok pucat dua jari pas kilatan benturan. Outline + aura punggung dimatiin biar close-up bersih
+	{ t: 47, kind: "pinch", actor: "figure", target: "bai" },
+	{ t: 47, kind: "closeup", actor: "figure", on: true },
 	{ t: 47, kind: "sfx", name: "clash", volume: 1 },
 	{ t: 47, kind: "vfx", name: "ring", at: PINCH, normal: v(0, 0, 1), scale: 26, color: WHITE },
 	// Ruang retak di titik benturan lalu pecah kayak kaca, selesai sebelum pindah ke close-up (47.6)
@@ -564,7 +579,14 @@ const events: CutEvent[] = [
 	{ t: 47.3, kind: "music", name: "none", fade: 0.8 },
 	{ t: 47.6, kind: "speed", scale: 1 },
 	// Waktu seakan berhenti: warna hampir hilang, hening total, ruang di belakang jari retak makin lebar tiap bunyi retak
-	{ t: 47.65, kind: "grade", to: { Saturation: -0.9, Contrast: 0.35 }, dur: 0.25 },
+	{ t: 47.65, kind: "grade", to: { Saturation: -0.85, Contrast: 0.4, Brightness: -0.08 }, dur: 0.25 },
+	// Qi di pedang padam pas dijepit: bilah baja kelihatan jelas, gak jadi batang putih silau lagi
+	{ t: 47.65, kind: "aura", actor: "bai", on: false },
+	{ t: 47.65, kind: "vfx", name: "motes", at: PINCH, color: Color3.fromRGB(230, 235, 255), life: 6.5 },
+	{ t: 49.45, kind: "vfx", name: "motes", at: v(-2.9, 40.7, -35.25), scale: 1.2, color: Color3.fromRGB(230, 235, 255), life: 4.6 },
+	{ t: 51.45, kind: "vfx", name: "spaceCrack", at: PINCH, scale: 1.1, color: VOIDRIM, life: 1.2 },
+	{ t: 51.5, kind: "glint", actor: "bai" },
+	{ t: 52.9, kind: "glint", actor: "bai" },
 	{ t: 47.65, kind: "freeze", on: true },
 	{ t: 47.65, kind: "vfx", name: "spaceCrack", at: PINCH_CRACK, scale: 0.36, color: VOIDRIM, stages: [1.85, 3.85], life: 6.35 },
 	{ t: 49.5, kind: "sfx", name: "crack", volume: 0.6 },
@@ -578,6 +600,7 @@ const events: CutEvent[] = [
 	{ t: 54.08, kind: "fade", to: 0, dur: 0.7, color: WHITE },
 	{ t: 54, kind: "grade", to: { Saturation: -0.1, Contrast: 0.15, TintColor: Color3.fromRGB(240, 242, 255) }, dur: 0.5 },
 	{ t: 54, kind: "still", actor: "bai", on: false },
+	{ t: 54, kind: "closeup", actor: "figure", on: false },
 	{ t: 54, kind: "break", actor: "bai" },
 	{ t: 54, kind: "vfx", name: "shard", at: PINCH, color: QI, life: FALL_T0 - 54 },
 	{ t: 54, kind: "freeze", on: false },

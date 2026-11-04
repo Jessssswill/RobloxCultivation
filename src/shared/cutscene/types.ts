@@ -92,6 +92,10 @@ export type CutEvent = At &
 		| { kind: "knock"; actor: string; dir: Vector3; power?: number; fade?: number }
 		/** Sayap kristal emas di punggung mekar / kuncup (kalau pedangnya punya LightWings, itu yang dipakai). */
 		| { kind: "wings"; actor: string; on: boolean }
+		/** Tangan pucat dua jari ngejepit ujung pedang aktor `target` (gantiin tangan balok R15 aktor ini). */
+		| { kind: "pinch"; actor: string; target: string }
+		/** Mode close-up aktor: outline mati + aura punggung disembunyiin. */
+		| { kind: "closeup"; actor: string; on: boolean }
 		/** Energi ngumpul ke ujung pedang selama `dur` detik (butiran ketarik masuk + pusaran). */
 		| { kind: "charge"; actor: string; dur: number; color?: Color3; scale?: number }
 		/** Kilau bintang di ujung pedang. */
@@ -119,7 +123,8 @@ export type CutEvent = At &
 					| "rift"
 					| "shard"
 					| "streak"
-					| "cleave";
+					| "cleave"
+					| "motes";
 				at: Vector3;
 				to?: Vector3;
 				/** Titik kontrol kurva buat fall (Bezier). */

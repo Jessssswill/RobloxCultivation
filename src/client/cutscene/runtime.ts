@@ -500,6 +500,16 @@ export class CutsceneRun {
 				if (actor) this.tw.add(on ? 0.3 : 0.6, (k) => actor.setWings(on ? k : 1 - k));
 				break;
 			}
+			case "pinch": {
+				const who = this.actors.get(e.actor);
+				const sword = this.actors.get(e.target);
+				const tip = sword?.bladeTip();
+				if (who && sword && tip) who.pinchHand(tip, sword.bladeFlat());
+				break;
+			}
+			case "closeup":
+				this.actors.get(e.actor)?.setCloseup(e.on);
+				break;
 			case "charge": {
 				const actor = this.actors.get(e.actor);
 				if (actor) vfx.charge(this.ctx, () => actor.bladeTip(), e.dur, e.color ?? QI, e.scale ?? 1);
@@ -627,6 +637,9 @@ export class CutsceneRun {
 				break;
 			case "streak":
 				vfx.streak(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.3);
+				break;
+			case "motes":
+				vfx.motes(this.ctx, e.at, e.scale ?? 1, color, e.life ?? 6);
 				break;
 			case "cleave":
 				vfx.cleave(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.2, e.life ?? 1);

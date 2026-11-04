@@ -673,14 +673,12 @@ export class Actor {
 	}
 
 	/**
-	 * Sayap: 0 kuncup + hilang, 1 mekar penuh. Pedang lama yang punya LightWings tetap pakai itu; selain itu
-	 * sayap kristal emas di punggung (bilah kaca emas bertulang cahaya, mekar kayak kipas dari atas ke bawah).
+	 * Sayap: 0 kuncup + hilang, 1 mekar penuh. Sayap kristal emas di punggung (bilah kaca emas bertulang
+	 * cahaya, mekar kayak kipas dari atas ke bawah). LightWings bawaan pedang tetap disembunyiin, soalnya
+	 * itu cuma pelat neon datar dan nutupin sayap kristal.
 	 */
 	setWings(a: number) {
-		if (this.wings) {
-			this.wings.Transparency = 1 - 0.85 * math.clamp(a, 0, 1);
-			return;
-		}
+		if (this.wings) this.wings.Transparency = 1;
 		if (!this.wingRig) {
 			if (a <= 0) return;
 			this.wingRig = this.buildWings();
@@ -797,6 +795,178 @@ export class Actor {
 			lower.Transparency = glass;
 			spine.Transparency = e <= 0.001 ? 1 : 1 - 0.95 * e;
 		}
+	}
+
+	/**
+	 * Mode close-up: outline Highlight mati (dari dekat jadi garis putus-putus aneh di jubah) dan aksesori punggung
+	 * kaku kayak aura disembunyiin (mesh-nya opaque, dari dekat cuma jadi gumpalan abu-abu buram).
+	 */
+	setCloseup(on: boolean) {
+		if (this.highlight) this.highlight.Enabled = !on;
+		for (const acc of this.model.GetChildren()) {
+			if (!acc.IsA("Accessory") || acc.AccessoryType !== Enum.AccessoryType.Back) continue;
+			const h = acc.FindFirstChild("Handle");
+			if (h && h.IsA("BasePart") && !h.FindFirstChildOfClass("WrapLayer")) h.LocalTransparencyModifier = on ? 1 : 0;
+		}
+	}
+
+	/**
+	 * Tangan pucat kayak giok yang ngejepit ujung pedang pakai dua jari (telunjuk di atas bilah, jari tengah di bawah,
+	 * jari manis + kelingking ditekuk, jempol nempel di samping). Tangan R15 bawaan cuma balok, jadi disembunyiin dan
+	 * diganti ini, lengan baloknya juga diganti lengan baju hanfu lebar. Dibangun dari ujung pedang (`tip`) ke arah
+	 * lengan bawah, jadi selalu pas sama posisi jepitan. Part-nya anchored (Sosok Diam gak gerak lagi) dan ikut
+	 * ke-hide bareng modelnya.
+	 */
+	pinchHand(tip: Vector3, flat?: [Vector3, number]) {
+		const hand = this.model.FindFirstChild("RightHand") as BasePart | undefined;
+		const fore = (this.model.FindFirstChild("RightLowerArm") as BasePart | undefined) ?? hand;
+		if (!fore) return;
+		const back = fore.Position.sub(tip);
+		if (back.Magnitude < 0.05) return;
+		const s = this.root.Size.Y / 2;
+		// Frame tangan: titik nol di ujung pedang, LookVector ke arah jari nunjuk (menjauh dari lengan),
+		// sumbu atas = normal sisi datar bilah, jadi dua jari ngejepit sisi datarnya
+		const T = CFrame.lookAt(tip, tip.sub(back.Unit), flat ? flat[0] : UP);
+		// Setengah tebal bilah + celah dikit (dalam satuan s biar bisa dicampur sama ukuran jari)
+		// (ukuran kotak part bilah bisa kegedean karena ikut pelindung tangan, jadi dibatesin ke tebal bilah wajar)
+		const h = ((flat ? math.clamp(flat[1], 0.02, 0.07) : 0.06) / 2 + 0.004) / s;
+		const folder = new Instance("Folder");
+		folder.Name = "PinchHand";
+		folder.Parent = this.model;
+		const SKIN_JADE = Color3.fromRGB(230, 228, 236);
+		const part = (shape: Enum.PartType, size: Vector3, cf: CFrame) => {
+			const p = new Instance("Part");
+			p.Name = "Hand";
+			p.Anchored = true;
+			p.CanCollide = false;
+			p.CanQuery = false;
+			p.CanTouch = false;
+			p.Massless = true;
+			p.Material = Enum.Material.SmoothPlastic;
+			p.Color = SKIN_JADE;
+			p.Shape = shape;
+			p.Size = size;
+			p.CFrame = cf;
+			p.Parent = folder;
+			return p;
+		};
+		const L = (x: number, y: number, z: number) => T.PointToWorldSpace(new Vector3(x * s, y * s, z * s));
+		// Kapsul (ruas jari) dari a ke b, radius r
+		const capsule = (a: Vector3, b: Vector3, r: number) => {
+			const d = b.sub(a);
+			const dir = d.Unit;
+			const ref = math.abs(dir.Dot(UP)) > 0.95 ? new Vector3(1, 0, 0) : UP;
+			const y = ref.sub(dir.mul(ref.Dot(dir))).Unit;
+			part(Enum.PartType.Cylinder, new Vector3(d.Magnitude, r * 2, r * 2), CFrame.fromMatrix(a.Lerp(b, 0.5), dir, y));
+			part(Enum.PartType.Ball, new Vector3(r * 2, r * 2, r * 2), new CFrame(a));
+			part(Enum.PartType.Ball, new Vector3(r * 2, r * 2, r * 2), new CFrame(b));
+		};
+		const ellipsoid = (x: number, y: number, z: number, size: Vector3) => {
+			const p = part(Enum.PartType.Block, size.mul(s), T.mul(new CFrame(x * s, y * s, z * s)));
+			const mesh = new Instance("SpecialMesh");
+			mesh.MeshType = Enum.MeshType.Sphere;
+			mesh.Parent = p;
+		};
+		// Telapak tegak (oval), jari nunjuk ke depan (-Z lokal)
+		ellipsoid(0, -0.01, 0.5, new Vector3(0.13, 0.3, 0.36));
+		// Telunjuk di atas bilah, jari tengah di bawah (sedikit lebih panjang), dua ruas biar ada lekuk
+		capsule(L(0, h + 0.06, 0.33), L(0, h + 0.048, 0.12), 0.04 * s);
+		capsule(L(0, h + 0.048, 0.12), L(0, h + 0.036, -0.07), 0.036 * s);
+		capsule(L(0, -h - 0.02, 0.33), L(0, -h - 0.03, 0.11), 0.042 * s);
+		capsule(L(0, -h - 0.03, 0.11), L(0, -h - 0.038, -0.09), 0.038 * s);
+		// Jari manis + kelingking ditekuk ke telapak, jempol nempel di samping
+		ellipsoid(0, -h - 0.09, 0.27, new Vector3(0.085, 0.075, 0.13));
+		ellipsoid(0, -h - 0.14, 0.31, new Vector3(0.075, 0.065, 0.11));
+		capsule(L(-0.06, -h - 0.06, 0.45), L(-0.055, -h - 0.085, 0.25), 0.042 * s);
+		// Pergelangan masuk ke lengan baju
+		capsule(L(0, -0.01, 0.62), L(0, -0.01, 0.98), 0.075 * s);
+		const hide = new Array<BasePart>();
+		if (hand) hide.push(hand);
+		// Lengan balok juga diganti lengan baju hanfu lebar warna gelap, tangan giok keluar dari ujungnya.
+		// Tanpa ini telapaknya ketelen balok lengan bawah (tebel 1 stud) dan yang kelihatan cuma ujung jari.
+		const upper = this.model.FindFirstChild("RightUpperArm") as BasePart | undefined;
+		if (upper && fore !== hand) {
+			const pt = (p: BasePart, name: string) => {
+				const a = p.FindFirstChild(name);
+				return a && a.IsA("Attachment") ? a.WorldPosition : p.CFrame.PointToWorldSpace(new Vector3(0, p.Size.Y / 2, 0));
+			};
+			const shoulder = pt(upper, "RightShoulderRigAttachment");
+			const elbow = pt(fore, "RightElbowRigAttachment");
+			const cuff = tip.add(back.Unit.mul(0.8 * s));
+			const SLEEVE = Color3.fromRGB(26, 25, 32);
+			const cloth = (shape: Enum.PartType, size: Vector3, cf: CFrame, color = SLEEVE) => {
+				const p = part(shape, size, cf);
+				p.Material = Enum.Material.Fabric;
+				p.Color = color;
+			};
+			const tube = (a: Vector3, b: Vector3, d: number, color?: Color3) => {
+				const v = b.sub(a);
+				if (v.Magnitude < 0.02) return;
+				const dir = v.Unit;
+				const ref = math.abs(dir.Dot(UP)) > 0.95 ? new Vector3(1, 0, 0) : UP;
+				const y = ref.sub(dir.mul(ref.Dot(dir))).Unit;
+				cloth(Enum.PartType.Cylinder, new Vector3(v.Magnitude, d, d), CFrame.fromMatrix(a.Lerp(b, 0.5), dir, y), color);
+			};
+			const ball = (p: Vector3, d: number) => cloth(Enum.PartType.Ball, new Vector3(d, d, d), new CFrame(p));
+			ball(shoulder, 0.95 * s);
+			tube(shoulder, elbow, 0.95 * s);
+			ball(elbow, 1 * s);
+			// Lengan bawah melebar ke ujung, mulut lengan baju gelap di ujungnya
+			const mid = elbow.Lerp(cuff, 0.5);
+			tube(elbow, mid, 1.05 * s);
+			tube(mid, cuff, 1.25 * s);
+			const arm = cuff.sub(elbow);
+			if (arm.Magnitude > 0.1) {
+				const a = arm.Unit;
+				tube(cuff, cuff.add(a.mul(0.02)), 1.1 * s, Color3.fromRGB(7, 7, 9));
+				// Kain lengan baju yang menggantung di bawah lengan (segitiga, paling dalam di ujung)
+				const flat = UP.sub(a.mul(UP.Dot(a)));
+				if (flat.Magnitude > 0.3) {
+					const down = flat.Unit.mul(-1);
+					const H = 0.9 * s;
+					const drape = new Instance("WedgePart");
+					drape.Name = "Sleeve";
+					drape.Anchored = true;
+					drape.CanCollide = false;
+					drape.CanQuery = false;
+					drape.CanTouch = false;
+					drape.Material = Enum.Material.Fabric;
+					drape.Color = SLEEVE;
+					drape.Size = new Vector3(0.05 * s, H, arm.Magnitude);
+					// Siku siku wedge (Y-, Z+) = atas di ujung lengan baju
+					drape.CFrame = CFrame.fromMatrix(mid.add(down.mul(0.5 * s + H / 2)), down.Cross(a), down, a);
+					drape.Parent = folder;
+				}
+			}
+			hide.push(upper, fore);
+		}
+		for (const p of hide) {
+			p.Transparency = 1;
+			for (const d of p.GetDescendants()) if (d.IsA("Decal")) d.Transparency = 1;
+		}
+	}
+
+	/** Normal sisi datar bilah + tebalnya (sumbu tertipis part bilah yang bukan arah panjang bilah). */
+	bladeFlat(): [Vector3, number] | undefined {
+		const tip = this.tipAtt;
+		const base = this.baseAtt;
+		const blade = tip?.Parent;
+		if (!tip || !base || !blade || !blade.IsA("BasePart")) return undefined;
+		const along = tip.WorldPosition.sub(base.WorldPosition);
+		if (along.Magnitude < 0.01) return undefined;
+		const dir = along.Unit;
+		const cf = blade.CFrame;
+		const axes: Array<[Vector3, number]> = [
+			[cf.RightVector, blade.Size.X],
+			[cf.UpVector, blade.Size.Y],
+			[cf.LookVector, blade.Size.Z],
+		];
+		let best: [Vector3, number] | undefined;
+		for (const [axis, size] of axes) {
+			if (math.abs(axis.Dot(dir)) > 0.7) continue;
+			if (!best || size < best[1]) best = [axis, size];
+		}
+		return best;
 	}
 
 	bladeTip(): Vector3 | undefined {

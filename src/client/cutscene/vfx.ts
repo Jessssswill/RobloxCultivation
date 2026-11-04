@@ -479,14 +479,15 @@ export function spaceCrack(ctx: VfxCtx, at: Vector3, scale = 1, color = WHITE, s
 	grow(first, 0.14);
 	stages.forEach((t, i) => ctx.tw.after(t, () => grow(first + ((1 - first) * (i + 1)) / n, 0.24)));
 
-	// Cahaya di pusat retakan + bintik cahaya bocor dari celah
-	const glow = beamOf(holder, att(holder, P.sub(right.mul(R * 0.32))), att(holder, P.add(right.mul(R * 0.32))), {
+	// Cahaya di pusat retakan (kecil, biar tangan/bilah di depannya gak ketutup silau) + bintik cahaya bocor dari celah
+	const glow = beamOf(holder, att(holder, P.sub(right.mul(R * 0.2))), att(holder, P.add(right.mul(R * 0.2))), {
 		Texture: TEX.glow,
 		TextureMode: Enum.TextureMode.Stretch,
-		Width0: R * 0.64,
-		Width1: R * 0.64,
-		Brightness: 3,
+		Width0: R * 0.4,
+		Width1: R * 0.4,
+		Brightness: 2,
 		Color: new ColorSequence(color),
+		Transparency: new NumberSequence(0.2),
 	});
 	let dust: ParticleEmitter | undefined;
 	if (ctx.q.tier >= 1) {
@@ -503,7 +504,8 @@ export function spaceCrack(ctx: VfxCtx, at: Vector3, scale = 1, color = WHITE, s
 		});
 		dust.Enabled = true;
 	}
-	burst(ctx, at, color, 0.6 * scale);
+	// Retakan kecil buat close-up gak pakai kilatan bintang (bisa nutup satu layar)
+	if (scale >= 0.6) burst(ctx, at, color, 0.6 * scale);
 
 	const close = (dur: number) => {
 		if (dust) dust.Enabled = false;
@@ -511,7 +513,7 @@ export function spaceCrack(ctx: VfxCtx, at: Vector3, scale = 1, color = WHITE, s
 			dur,
 			(k) => {
 				shade(bolts, 1 - k, 1 - 0.4 * k, false);
-				glow.Transparency = new NumberSequence(k);
+				glow.Transparency = new NumberSequence(0.2 + 0.8 * k);
 			},
 			() => holder.Destroy(),
 		);
@@ -1050,6 +1052,25 @@ export function charge(ctx: VfxCtx, at: () => Vector3 | undefined, dur: number, 
 		},
 		() => (motes.Enabled = false),
 	);
+}
+
+/** Debu cahaya beku: titik-titik cahaya kecil yang diem melayang di udara (momen waktu berhenti). */
+export function motes(ctx: VfxCtx, at: Vector3, scale = 1, color = WHITE, life = 6) {
+	const P = ctx.origin.PointToWorldSpace(at);
+	const h = host(ctx, new CFrame(P), life + 1);
+	h.Shape = Enum.PartType.Ball;
+	h.Size = new Vector3(3, 3, 3).mul(scale);
+	emitter(ctx, h, {
+		Texture: TEX.glow,
+		Shape: Enum.ParticleEmitterShape.Sphere,
+		ShapeStyle: Enum.ParticleEmitterShapeStyle.Volume,
+		Color: new ColorSequence(color),
+		Size: seq([0, 0.05 * scale], [0.5, 0.09 * scale], [1, 0.05 * scale]),
+		Transparency: seq([0, 1], [0.08, 0.15], [0.9, 0.3], [1, 1]),
+		Lifetime: new NumberRange(life),
+		Speed: new NumberRange(0.02, 0.08),
+		SpreadAngle: new Vector2(180, 180),
+	}).Emit(count(ctx, 40));
 }
 
 /** Serpihan pedang yang masih dijepit (melayang pelan, bercahaya) sampai `life` detik. */
