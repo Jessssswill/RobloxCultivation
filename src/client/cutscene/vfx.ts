@@ -1,7 +1,8 @@
-// VFX cutscene: tebasan bulan sabit, gelombang tebasan raksasa, ledakan cahaya, gelombang kejut, petir,
-// retakan ruang (udara pecah kayak kaca, sobekan ruang bekas tebasan), retakan tanah bercahaya, serpihan jatuh,
-// pedang pecah, kilau pedang, debu, pasukan terhempas, afterimage. Pakai tekstur sendiri yang udah di-upload
-// + partikel (murah, bisa di-batch GPU). Jumlah partikel dikali q.particles, lapisan ekstra cuma di tier tinggi.
+// VFX cutscene: tebasan bulan sabit, gelombang tebasan raksasa, sinar tebasan emas raksasa (cleave), kilatan pedang
+// melesat, energi ngumpul, ledakan cahaya, gelombang kejut, petir, retakan ruang/langit bergaya petir (sobekan ruang
+// bekas tebasan), tanah pecah 3D, serpihan jatuh, pedang pecah, kilau pedang, debu, pasukan terhempas, afterimage.
+// Pakai tekstur sendiri yang udah di-upload + partikel (murah, bisa di-batch GPU). Jumlah partikel dikali q.particles,
+// lapisan ekstra cuma di tier tinggi.
 
 import { Workspace } from "@rbxts/services";
 import { ease } from "shared/cutscene/ease";
@@ -311,162 +312,34 @@ export function lightning(ctx: VfxCtx, from: Vector3, to: Vector3, color: Color3
 	}
 }
 
-/** Satu garis retak di bidang 2D: dari a ke b, muncul pas "jari-jari" retakan lewat d0..d1. */
-interface Seg {
-	a: Vector2;
-	b: Vector2;
-	d0: number;
-	d1: number;
-	w: number;
+// ---------- Retakan bergaya petir (langit / ruang pecah), tanah pecah 3D ----------
+// Gaya dari referensi donghua (Swallowed Star): retakan putih panas bercabang kayak petir, pinggirnya cahaya oranye
+// emas, sinar bocor dari celahnya, pecahan kaca berjatuhan. Satu retakan = 2 Beam bertekstur, jadi murah.
+
+/** Putih panas (inti cahaya). */
+const HOT = Color3.fromRGB(255, 246, 222);
+/** Pinggiran cahaya hangat (oranye emas) di belakang retakan dan sinar. */
+const EMBER = Color3.fromRGB(255, 160, 70);
+
+function att(parent: Instance, world: Vector3): Attachment {
+	const a = new Instance("Attachment");
+	a.Parent = parent;
+	a.WorldPosition = world;
+	return a;
 }
 
-/** Titik di polyline sinar pada jarak tempuh d (buat jaring kaca). */
-function pointAt(pts: Array<[Vector2, number]>, d: number): Vector2 | undefined {
-	for (let i = 1; i < pts.size(); i++) {
-		const [p0, d0] = pts[i - 1];
-		const [p1, d1] = pts[i];
-		if (d <= d1) return p0.Lerp(p1, (d - d0) / math.max(d1 - d0, 1e-3));
-	}
-	return undefined;
-}
-
-/**
- * Pola retakan: sinar patah-patah dari pusat (makin ke ujung makin tipis), cabang, dan jaring melingkar
- * kayak kaca dihantam. Semua di bidang 2D, nanti dipetakan ke 3D.
- */
-function crackPattern(rng: Random, radius: number, rays: number, branchChance: number, web: boolean, width: number): Seg[] {
-	const segs: Seg[] = [];
-	const rayPts: Array<Array<[Vector2, number]>> = [];
-	for (let r = 0; r < rays; r++) {
-		let heading = (r / rays) * math.pi * 2 + rng.NextNumber(-0.3, 0.3);
-		let p = Vector2.zero;
-		let dist = 0;
-		const reach = radius * rng.NextNumber(0.62, 1);
-		const pts: Array<[Vector2, number]> = [[p, 0]];
-		while (dist < reach) {
-			const len = radius * rng.NextNumber(0.09, 0.19);
-			heading += rng.NextNumber(-0.5, 0.5);
-			const q = p.add(new Vector2(math.cos(heading), math.sin(heading)).mul(len));
-			const w = width * (1 - 0.7 * (dist / radius));
-			segs.push({ a: p, b: q, d0: dist, d1: dist + len, w });
-			if (dist > radius * 0.12 && rng.NextNumber() < branchChance) {
-				let bh = heading + (rng.NextNumber() < 0.5 ? -1 : 1) * rng.NextNumber(0.5, 1.1);
-				let bp = q;
-				let bd = dist + len;
-				const n = rng.NextInteger(1, 3);
-				for (let k = 0; k < n; k++) {
-					const bl = radius * rng.NextNumber(0.05, 0.12);
-					bh += rng.NextNumber(-0.4, 0.4);
-					const bq = bp.add(new Vector2(math.cos(bh), math.sin(bh)).mul(bl));
-					segs.push({ a: bp, b: bq, d0: bd, d1: bd + bl, w: w * 0.55 });
-					bp = bq;
-					bd += bl;
-				}
-			}
-			p = q;
-			dist += len;
-			pts.push([p, dist]);
-		}
-		rayPts.push(pts);
-	}
-	if (web) {
-		for (const frac of [0.28, 0.52, 0.78]) {
-			const rr = radius * frac;
-			for (let r = 0; r < rays; r++) {
-				if (rng.NextNumber() < 0.3) continue;
-				const A = pointAt(rayPts[r], rr * rng.NextNumber(0.92, 1.08));
-				const B = pointAt(rayPts[(r + 1) % rays], rr * rng.NextNumber(0.92, 1.08));
-				if (!A || !B) continue;
-				const mid = A.Lerp(B, 0.5).mul(rng.NextNumber(0.9, 1.05));
-				const span = A.sub(B).Magnitude;
-				segs.push({ a: A, b: mid, d0: rr, d1: rr + span * 0.5, w: width * 0.32 });
-				segs.push({ a: mid, b: B, d0: rr + span * 0.5, d1: rr + span, w: width * 0.32 });
-			}
-		}
-	}
-	return segs;
-}
-
-interface CrackNet {
-	parts: BasePart[];
-	reveal: (r: number) => void;
-	/** Jari-jari sekarang (buat animasi melebar). */
-	r: number;
-}
-
-/**
- * Gambar pola retakan di bidang (pusat P, sumbu kanan/atas, normal N menghadap penonton):
- * inti hitam (celah ke ruang hampa) di depan, pinggiran neon lebih lebar di belakangnya, jadi kelihatan
- * celah gelap dengan tepi menyala. Awalnya kosong, `reveal(r)` munculin semua garis sampai jari-jari r.
- */
-function crackNet(ctx: VfxCtx, segs: Seg[], P: Vector3, right: Vector3, up: Vector3, N: Vector3, rim: Color3, thick: number): CrackNet {
-	const parts: BasePart[] = [];
-	const to3 = (v: Vector2) => P.add(right.mul(v.X)).add(up.mul(v.Y));
-	const items = segs.map((sg) => {
-		const a = to3(sg.a);
-		const b = to3(sg.b);
-		const dir = b.sub(a).Unit;
-		const len = b.sub(a).Magnitude;
-		const core = host(ctx, new CFrame(a));
-		core.Material = Enum.Material.SmoothPlastic;
-		core.Color = Color3.fromRGB(4, 3, 9);
-		const glow = host(ctx, new CFrame(a));
-		glow.Material = Enum.Material.Neon;
-		glow.Color = rim;
-		parts.push(core, glow);
-		return { sg, a, dir, len, core, glow, vis: -1 };
-	});
-	const net: CrackNet = {
-		parts,
-		r: 0,
-		reveal: (r) => {
-			net.r = r;
-			for (const it of items) {
-				const { sg } = it;
-				const vis = sg.d1 > sg.d0 ? math.clamp((r - sg.d0) / (sg.d1 - sg.d0), 0, 1) : r >= sg.d0 ? 1 : 0;
-				if (math.abs(vis - it.vis) < 0.01) continue;
-				it.vis = vis;
-				if (vis <= 0) {
-					it.core.Transparency = 1;
-					it.glow.Transparency = 1;
-					continue;
-				}
-				const l = it.len * vis;
-				const mid = it.a.add(it.dir.mul(l / 2));
-				const cf = CFrame.lookAt(mid, mid.add(it.dir), N);
-				it.core.CFrame = cf.add(N.mul(thick * 0.6));
-				it.core.Size = new Vector3(sg.w, thick, l + sg.w * 0.5);
-				it.core.Transparency = 0;
-				it.glow.CFrame = cf;
-				it.glow.Size = new Vector3(sg.w * 2.6 + 0.06, thick, l + sg.w * 1.6);
-				it.glow.Transparency = 0.12;
-			}
-		},
-	};
-	return net;
-}
-
-/** Tween jari-jari retakan ke `to`. */
-function growNet(ctx: VfxCtx, net: CrackNet, to: number, dur: number) {
-	const from = net.r;
-	ctx.tw.add(dur, (k) => net.reveal(from + (to - from) * ease("out", k)));
-}
-
-/** Retakan memudar terus dihapus. `keepCore` = celah hitam tetap ada (retakan tanah). */
-function fadeNet(ctx: VfxCtx, net: CrackNet, dur: number, keepCore: boolean) {
-	const glows = net.parts.filter((p) => p.Material === Enum.Material.Neon && p.Transparency < 1);
-	const cores = net.parts.filter((p) => p.Material !== Enum.Material.Neon && p.Transparency < 1);
-	ctx.tw.add(
-		dur,
-		(k) => {
-			for (const g of glows) g.Transparency = 0.12 + 0.88 * k;
-			if (!keepCore) for (const c of cores) c.Transparency = k;
-		},
-		() => {
-			for (const g of glows) g.Destroy();
-			if (!keepCore) for (const c of cores) c.Destroy();
-		},
-	);
+/** Beam lurus ngadep kamera di antara dua attachment (cahaya murni, gak kena lampu). */
+function beamOf(parent: Instance, a0: Attachment, a1: Attachment, props: Partial<WritableInstanceProperties<Beam>>): Beam {
+	const b = new Instance("Beam");
+	b.Attachment0 = a0;
+	b.Attachment1 = a1;
+	b.FaceCamera = true;
+	b.LightEmission = 1;
+	b.LightInfluence = 0;
+	b.Segments = 1;
+	for (const [k, v] of pairs(props as Record<string, unknown>)) (b as unknown as Record<string, unknown>)[k] = v;
+	b.Parent = parent;
+	return b;
 }
 
 /** Basis bidang yang menghadap kamera di titik P: [kanan, atas, normal]. */
@@ -478,22 +351,57 @@ function facing(P: Vector3): [Vector3, Vector3, Vector3] {
 	return [basis.RightVector, basis.UpVector, N];
 }
 
-/** Retakan tanah: celah gelap bercabang dengan tepi bercahaya yang meredup (celahnya tetap ada). */
-export function cracks(ctx: VfxCtx, at: Vector3, scale = 1, glow?: Color3) {
-	const P = ctx.origin.PointToWorldSpace(at).add(new Vector3(0, 0.04, 0));
-	const rng = new Random();
-	const rays = ctx.q.tier === 0 ? 7 : ctx.q.tier === 1 ? 10 : 13;
-	const segs = crackPattern(rng, 9 * scale, rays, ctx.q.tier >= 1 ? 0.45 : 0.2, false, 0.32 * scale);
-	const net = crackNet(ctx, segs, P, new Vector3(1, 0, 0), new Vector3(0, 0, 1), new Vector3(0, 1, 0), glow ?? Color3.fromRGB(255, 170, 90), 0.05);
-	growNet(ctx, net, 9 * scale, 0.28);
-	ctx.tw.after(0.6, () => fadeNet(ctx, net, 2.8, true));
-	if (ctx.q.lights && glow) {
-		const h = host(ctx, new CFrame(P.add(new Vector3(0, 1, 0))), 2.5);
-		const l = new Instance("PointLight");
-		l.Color = glow;
-		l.Range = 14 * scale;
-		l.Parent = h;
-		ctx.tw.add(2.4, (k) => (l.Brightness = 3 * (1 - k)));
+/** Satu retakan petir yang merambat dari `from` ke `to`. */
+interface Bolt {
+	from: Vector3;
+	to: Vector3;
+	tip: Attachment;
+	crack: Beam;
+	haze: Beam;
+	w: number;
+	/** Seberapa jauh udah merambat (0..1). */
+	f: number;
+}
+
+function bolt(holder: Part, rng: Random, from: Vector3, to: Vector3, w: number, glow: Color3): Bolt {
+	const a0 = att(holder, from);
+	const tip = att(holder, from);
+	// Tekstur petir diulang per stud (Wrap), jadi pas merambat cabangnya kebuka, bukan ketarik
+	const crack = beamOf(holder, a0, tip, {
+		Texture: TEX.lightning,
+		TextureMode: Enum.TextureMode.Wrap,
+		TextureLength: w * rng.NextNumber(2.6, 3.8),
+		Width0: w,
+		Width1: w * 0.7,
+		Brightness: 3,
+		Color: new ColorSequence(HOT),
+	});
+	const haze = beamOf(holder, a0, tip, {
+		Texture: TEX.glow,
+		TextureMode: Enum.TextureMode.Stretch,
+		Width0: w * 0.8,
+		Width1: w * 0.5,
+		Brightness: 2,
+		Color: new ColorSequence(glow),
+		Transparency: new NumberSequence(0.4),
+	});
+	return { from, to, tip, crack, haze, w, f: 0 };
+}
+
+function reach(b: Bolt, f: number) {
+	b.f = f;
+	b.tip.WorldPosition = b.from.Lerp(b.to, f);
+}
+
+/** Terang retakan: a = 1 penuh, 0 hilang. `flicker` = kedip acak kayak petir pas baru retak. */
+function shade(bolts: Bolt[], a: number, widthMul: number, flicker: boolean) {
+	for (const b of bolts) {
+		const t = math.clamp(1 - a + (flicker ? math.random() * 0.6 * a : 0), 0, 1);
+		// Ujung retakan memudar, gak kepotong kotak
+		b.crack.Transparency = seq([0, t], [0.8, t], [1, 1]);
+		b.haze.Transparency = new NumberSequence(0.4 + 0.6 * t);
+		b.crack.Width0 = b.w * widthMul;
+		b.crack.Width1 = b.w * 0.7 * widthMul;
 	}
 }
 
@@ -539,36 +447,50 @@ function glassShards(ctx: VfxCtx, P: Vector3, right: Vector3, up: Vector3, N: Ve
 }
 
 /**
- * Retakan ruang ala donghua: udara retak kayak kaca dihantam (celah hitam ke ruang hampa, tepi menyala),
- * melebar bertahap (`stages`, detik sejak muncul), lalu pecah berhamburan (`shatter`) atau menutup lagi (`life`).
- * Bidangnya menghadap kamera pas muncul.
+ * Retakan ruang ala donghua: udara retak dari satu titik kayak kaca dihantam petir (retakan putih panas bercabang,
+ * cahaya di pusatnya), melebar bertahap (`stages`, detik sejak muncul), lalu pecah berhamburan (`shatter`) atau
+ * meredup sampai hilang (`life`). Bidangnya menghadap kamera pas muncul.
  */
 export function spaceCrack(ctx: VfxCtx, at: Vector3, scale = 1, color = WHITE, stages: number[] = [], shatter?: number, life = 3) {
 	const P = ctx.origin.PointToWorldSpace(at);
 	const [right, up, N] = facing(P);
 	const rng = new Random();
 	const R = 7 * scale;
-	const rays = ctx.q.tier === 0 ? 7 : ctx.q.tier === 1 ? 10 : 13;
-	const segs = crackPattern(rng, R, rays, ctx.q.tier >= 1 ? 0.45 : 0.18, ctx.q.tier >= 1, 0.17 * scale);
-	const net = crackNet(ctx, segs, P, right, up, N, color, 0.04 * scale);
+	const holder = host(ctx, new CFrame(P));
+	const rays = ctx.q.tier === 0 ? 6 : ctx.q.tier === 1 ? 8 : 11;
+	const bolts: Bolt[] = [];
+	for (let r = 0; r < rays; r++) {
+		const ang = (r / rays) * math.pi * 2 + rng.NextNumber(-0.25, 0.25);
+		// Sedikit maju-mundur dari bidang biar ada kedalaman pas kamera geser
+		const d = right.mul(math.cos(ang)).add(up.mul(math.sin(ang))).add(N.mul(rng.NextNumber(-0.2, 0.2))).Unit;
+		bolts.push(bolt(holder, rng, P, P.add(d.mul(R * rng.NextNumber(0.6, 1))), R * rng.NextNumber(0.3, 0.45), color));
+	}
 	const n = stages.size();
 	const first = n > 0 ? 0.36 : 1;
-	growNet(ctx, net, R * first, 0.14);
-	stages.forEach((t, i) => ctx.tw.after(t, () => growNet(ctx, net, R * (first + ((1 - first) * (i + 1)) / n), 0.24)));
+	let f = 0;
+	const grow = (to: number, dur: number) => {
+		const from = f;
+		ctx.tw.add(dur, (k) => {
+			f = from + (to - from) * ease("out", k);
+			for (const b of bolts) reach(b, f);
+			shade(bolts, 1, 1, k < 0.7);
+		});
+	};
+	grow(first, 0.14);
+	stages.forEach((t, i) => ctx.tw.after(t, () => grow(first + ((1 - first) * (i + 1)) / n, 0.24)));
 
-	// Lubang hampa di pusat + bintik cahaya bocor dari celah
-	const hole = host(ctx, new CFrame(P.add(N.mul(0.05 * scale))));
-	hole.Shape = Enum.PartType.Ball;
-	hole.Material = Enum.Material.SmoothPlastic;
-	hole.Color = Color3.fromRGB(2, 2, 6);
-	ctx.tw.add(0.18, (k) => {
-		const d = 0.7 * scale * ease("out", k);
-		hole.Size = new Vector3(d, d, d);
-		hole.Transparency = 0;
+	// Cahaya di pusat retakan + bintik cahaya bocor dari celah
+	const glow = beamOf(holder, att(holder, P.sub(right.mul(R * 0.32))), att(holder, P.add(right.mul(R * 0.32))), {
+		Texture: TEX.glow,
+		TextureMode: Enum.TextureMode.Stretch,
+		Width0: R * 0.64,
+		Width1: R * 0.64,
+		Brightness: 3,
+		Color: new ColorSequence(color),
 	});
 	let dust: ParticleEmitter | undefined;
 	if (ctx.q.tier >= 1) {
-		dust = emitter(ctx, hole, {
+		dust = emitter(ctx, holder, {
 			Texture: TEX.spark,
 			Color: new ColorSequence(color, Color3.fromRGB(170, 150, 255)),
 			Size: seq([0, 0.25 * scale], [1, 0]),
@@ -585,12 +507,18 @@ export function spaceCrack(ctx: VfxCtx, at: Vector3, scale = 1, color = WHITE, s
 
 	const close = (dur: number) => {
 		if (dust) dust.Enabled = false;
-		fadeNet(ctx, net, dur, false);
-		ctx.tw.add(dur, (k) => (hole.Transparency = k), () => hole.Destroy());
+		ctx.tw.add(
+			dur,
+			(k) => {
+				shade(bolts, 1 - k, 1 - 0.4 * k, false);
+				glow.Transparency = new NumberSequence(k);
+			},
+			() => holder.Destroy(),
+		);
 	};
 	if (shatter !== undefined) {
 		ctx.tw.after(shatter, () => {
-			glassShards(ctx, P, right, up, N, net.r, scale, Color3.fromRGB(226, 232, 255));
+			glassShards(ctx, P, right, up, N, R * math.max(f, 0.3), scale, Color3.fromRGB(226, 232, 255));
 			burst(ctx, at, color, 1.4 * scale);
 			close(0.22);
 		});
@@ -600,8 +528,9 @@ export function spaceCrack(ctx: VfxCtx, at: Vector3, scale = 1, color = WHITE, s
 }
 
 /**
- * Sobekan ruang bekas tebasan: celah hitam memanjang A ke B (paling lebar di tengah), tepi menyala, ada retak kecil
- * di pinggirnya. Kebuka ngikutin arah tebasan, bertahan `life` detik, terus menutup dari ujung ke tengah.
+ * Sobekan ruang bekas tebasan: retakan petir di sepanjang jalur tebasan (merambat dari tengah ke dua ujung), cabang
+ * retak menjalar ke samping kayak langit pecah (sebagian maju/mundur biar 3D), sinar bocor dari celahnya, pecahan kaca
+ * berjatuhan. Bertahan `life` detik lalu meredup sampai hilang total.
  */
 export function rift(ctx: VfxCtx, from: Vector3, to: Vector3, color: Color3, scale = 1, life = 1.6) {
 	const A = ctx.origin.PointToWorldSpace(from);
@@ -614,62 +543,65 @@ export function rift(ctx: VfxCtx, from: Vector3, to: Vector3, color: Color3, sca
 	const N = flat.Magnitude > 0.01 ? flat.Unit : new Vector3(0, 0, 1);
 	const side = dir.Cross(N).Unit;
 	const rng = new Random();
-	const n = ctx.q.tier === 0 ? 10 : 18;
-	const W = math.clamp(len * 0.022, 0.6, 5) * scale;
-	const thick = math.max(0.06, W * 0.04);
-	const pts: Vector3[] = [];
-	for (let i = 0; i <= n; i++) {
-		const s = i / n;
-		const jitter = i === 0 || i === n ? 0 : rng.NextNumber(-1, 1) * W * 0.35;
-		pts.push(A.add(dir.mul(len * s)).add(side.mul(jitter)));
-	}
-	const segs: Array<{ a: Vector3; b: Vector3; s: number; core: Part; glow: Part }> = [];
+	const holder = host(ctx, new CFrame(mid));
+	const W = math.clamp(len * 0.06, 1.2, 14) * scale;
+	const main = [bolt(holder, rng, mid, A, W, color), bolt(holder, rng, mid, B, W, color)];
+	const branches: Array<[Bolt, number]> = [];
+	const n = ctx.q.tier === 0 ? 4 : ctx.q.tier === 1 ? 7 : 11;
 	for (let i = 0; i < n; i++) {
-		const core = host(ctx, new CFrame(pts[i]));
-		core.Material = Enum.Material.SmoothPlastic;
-		core.Color = Color3.fromRGB(3, 2, 8);
-		const glow = host(ctx, new CFrame(pts[i]));
-		glow.Material = Enum.Material.Neon;
-		glow.Color = color;
-		segs.push({ a: pts[i], b: pts[i + 1], s: (i + 0.5) / n, core, glow });
+		const s = rng.NextNumber(0.08, 0.92);
+		const ang = rng.NextNumber(-0.75, 0.75);
+		const d = side
+			.mul((i % 2 === 0 ? 1 : -1) * math.cos(ang))
+			.add(dir.mul(math.sin(ang)))
+			.add(N.mul(rng.NextNumber(-0.35, 0.35))).Unit;
+		const root = A.Lerp(B, s).add(N.mul(rng.NextNumber(-0.5, 0.5) * W));
+		const l = len * rng.NextNumber(0.1, 0.26) * (1.15 - math.abs(s - 0.5));
+		// Cabang dekat tengah retak duluan, makin ke ujung makin telat (kayak retaknya menjalar)
+		branches.push([bolt(holder, rng, root, root.add(d.mul(l)), W * rng.NextNumber(0.45, 0.8), color), math.abs(s - 0.5) * 0.3 + rng.NextNumber(0, 0.06)]);
 	}
-	// Retak kecil di pinggir sobekan
-	const extra: CrackNet[] = [];
+	const all = [...main, ...branches.map(([b]) => b)];
+
+	// Sinar bocor dari celah, condong ke arah kamera (kerasa volume)
+	const rays: Beam[] = [];
 	if (ctx.q.tier >= 1) {
-		const branches = ctx.q.tier === 2 ? 7 : 4;
-		for (let b = 0; b < branches; b++) {
-			const s = rng.NextNumber(0.2, 0.8);
-			const P = A.add(dir.mul(len * s));
-			const bs = crackPattern(rng, W * 3, 3, 0.3, false, W * 0.12);
-			const net = crackNet(ctx, bs, P, dir, side, N, color, thick);
-			extra.push(net);
-			ctx.tw.after(0.1 + s * 0.12, () => growNet(ctx, net, W * 3, 0.2));
+		const nr = ctx.q.tier === 2 ? 6 : 3;
+		for (let i = 0; i < nr; i++) {
+			const P = A.Lerp(B, rng.NextNumber(0.15, 0.85));
+			const d = side
+				.mul(i % 2 === 0 ? 0.6 : -0.6)
+				.add(N.mul(0.8))
+				.add(rng.NextUnitVector().mul(0.25)).Unit;
+			const L = W * rng.NextNumber(2.5, 4);
+			rays.push(
+				beamOf(holder, att(holder, P.sub(d.mul(L * 0.3))), att(holder, P.add(d.mul(L))), {
+					Texture: TEX.glow,
+					TextureMode: Enum.TextureMode.Stretch,
+					Width0: W * 0.35,
+					Width1: W * 1.3,
+					Brightness: 1.5,
+					Color: new ColorSequence(color),
+					Transparency: new NumberSequence(1),
+				}),
+			);
 		}
 	}
-	const shape = (open: number, closing: number) => {
-		for (const sg of segs) {
-			// Lebar: paling lebar di tengah, kebuka ngikutin arah tebasan, nutup dari ujung
-			const profile = math.sin(math.pi * sg.s) ** 0.7;
-			const reveal = math.clamp(open * 1.4 - sg.s * 0.4, 0, 1);
-			const shut = math.clamp(1 - closing * 1.6 + math.abs(sg.s - 0.5) * -1.2 + 0.6, 0, 1);
-			const w = W * profile * reveal * shut;
-			if (w < 0.02) {
-				sg.core.Transparency = 1;
-				sg.glow.Transparency = 1;
-				continue;
-			}
-			const l = sg.b.sub(sg.a).Magnitude;
-			const m = sg.a.Lerp(sg.b, 0.5);
-			const cf = CFrame.lookAt(m, sg.b, N);
-			sg.core.CFrame = cf.add(N.mul(thick * 0.6));
-			sg.core.Size = new Vector3(w, thick, l + w * 0.6);
-			sg.core.Transparency = 0;
-			sg.glow.CFrame = cf;
-			sg.glow.Size = new Vector3(w * 1.5 + 0.25 * scale, thick, l + w);
-			sg.glow.Transparency = 0.1;
-		}
-	};
-	ctx.tw.add(0.2, (k) => shape(ease("out", k), 0));
+	const rayLook = (t: number) => seq([0, 1], [0.25, t], [1, 1]);
+
+	ctx.tw.add(0.5, (k) => {
+		const t = k * 0.5;
+		for (const b of main) reach(b, ease("expoOut", math.clamp(t / 0.18, 0, 1)));
+		for (const [b, delay] of branches) reach(b, ease("out", math.clamp((t - delay) / 0.22, 0, 1)));
+		shade(all, 1, 1, t < 0.3);
+		const ray = rayLook(0.5 + 0.5 * (1 - math.clamp(t / 0.2, 0, 1)));
+		for (const r of rays) r.Transparency = ray;
+	});
+	if (ctx.q.tier >= 1) {
+		ctx.tw.after(0.12, () => {
+			const tint = Color3.fromRGB(255, 238, 205);
+			for (const s of [0.32, 0.68]) glassShards(ctx, A.Lerp(B, s), dir, side, N, W * 0.9, math.max(W / 6, 0.25), tint);
+		});
+	}
 	if (ctx.q.lights) {
 		const h = host(ctx, new CFrame(mid), life + 0.8);
 		const l = new Instance("PointLight");
@@ -678,19 +610,446 @@ export function rift(ctx: VfxCtx, from: Vector3, to: Vector3, color: Color3, sca
 		l.Parent = h;
 		ctx.tw.add(life + 0.6, (k) => (l.Brightness = 4 * (1 - k)));
 	}
-	ctx.tw.after(life, () => {
-		for (const net of extra) fadeNet(ctx, net, 0.5, false);
+	ctx.tw.after(life, () =>
 		ctx.tw.add(
-			0.55,
-			(k) => shape(1, ease("in", k)),
-			() => {
-				for (const sg of segs) {
-					sg.core.Destroy();
-					sg.glow.Destroy();
-				}
+			0.6,
+			(k) => {
+				shade(all, 1 - ease("in", k), 1 - 0.5 * k, false);
+				const ray = rayLook(0.5 + 0.5 * k);
+				for (const r of rays) r.Transparency = ray;
 			},
+			() => holder.Destroy(),
+		),
+	);
+}
+
+/** Material + warna tanah di titik P. Part set cutscene gak bisa di-raycast (CanQuery mati), jadi dicari dari kotaknya. */
+function groundAt(ctx: VfxCtx, P: Vector3): [Enum.Material, Color3] {
+	let best: BasePart | undefined;
+	let bestGap = math.huge;
+	for (const d of ctx.root.GetDescendants()) {
+		if (!d.IsA("BasePart") || d.Name === "Fx" || d.Transparency > 0.9 || d.Size.Magnitude < 8) continue;
+		const lp = d.CFrame.PointToObjectSpace(P);
+		const h = d.Size.div(2);
+		if (math.abs(lp.X) > h.X + 0.6 || math.abs(lp.Y) > h.Y + 0.6 || math.abs(lp.Z) > h.Z + 0.6) continue;
+		const cf = d.CFrame;
+		const top = cf.Y + math.abs(cf.RightVector.Y) * h.X + math.abs(cf.UpVector.Y) * h.Y + math.abs(cf.LookVector.Y) * h.Z;
+		const gap = math.abs(top - P.Y);
+		if (gap < bestGap) {
+			bestGap = gap;
+			best = d;
+		}
+	}
+	return best ? [best.Material, best.Color] : [Enum.Material.Slate, Color3.fromRGB(120, 116, 110)];
+}
+
+interface Plate {
+	p: Part;
+	from: CFrame;
+	to: CFrame;
+	delay: number;
+}
+
+/**
+ * Tanah pecah 3D ala donghua: lempeng tanah (material + warna ikut tanah di situ) terangkat miring melingkar kayak
+ * kawah, celah di antaranya nyala lalu mendingin. Habis `life` detik lempengnya turun lagi dan hilang total
+ * (gak ninggalin bekas hitam).
+ */
+export function cracks(ctx: VfxCtx, at: Vector3, scale = 1, glow?: Color3, life = 1.8) {
+	const C = ctx.origin.PointToWorldSpace(at);
+	const F = new CFrame(C).mul(ctx.origin.Rotation);
+	const upW = F.UpVector;
+	const [mat, col] = groundAt(ctx, C);
+	const rng = new Random();
+	const rings = ctx.q.tier === 0 ? 2 : ctx.q.tier === 1 ? 3 : 4;
+	const edges = [1.1, 2.6, 4.4, 6.4, 8.6];
+	const sectors = [6, 9, 12, 15];
+	const tilts = [
+		[20, 32],
+		[12, 22],
+		[6, 14],
+		[2, 8],
+	];
+	const outer = edges[rings] * scale;
+	const seam = glow ?? Color3.fromRGB(255, 170, 90);
+
+	// Dasar di bawah lempeng (cuma kelihatan di celah): nyala dulu terus mendingin jadi gelap
+	const pit = host(ctx, F.mul(new CFrame(0, -0.02, 0)).mul(CFrame.Angles(0, 0, math.pi / 2)));
+	pit.Shape = Enum.PartType.Cylinder;
+	pit.Material = Enum.Material.Neon;
+	pit.Color = seam;
+	pit.Size = new Vector3(0.12, outer * 1.94, outer * 1.94);
+	pit.Transparency = 0;
+
+	const plates: Plate[] = [];
+	for (let ring = 0; ring < rings; ring++) {
+		const r0 = edges[ring] * scale;
+		const r1 = edges[ring + 1] * scale;
+		const n = sectors[ring];
+		const off = rng.NextNumber(0, math.pi * 2);
+		const bounds: number[] = [];
+		for (let i = 0; i <= n; i++) bounds.push(off + ((i + (i === 0 || i === n ? 0 : rng.NextNumber(-0.25, 0.25))) / n) * math.pi * 2);
+		for (let i = 0; i < n; i++) {
+			const a0 = bounds[i];
+			const a1 = bounds[i + 1];
+			const am = (a0 + a1) / 2;
+			const rm = (r0 + r1) / 2;
+			const width = 2 * rm * math.sin((a1 - a0) / 2) * rng.NextNumber(0.88, 0.96);
+			const depth = (r1 - r0) * rng.NextNumber(0.86, 0.94);
+			const thick = rng.NextNumber(0.5, 0.85) * math.max(scale, 0.6);
+			const radial = new Vector3(math.cos(am), 0, math.sin(am));
+			const center = radial.mul(rm);
+			const psi = math.rad(rng.NextNumber(tilts[ring][0], tilts[ring][1]));
+			// Hadap keluar (LookVector = arah radial). Dimiringin: pinggir dalam terangkat, pinggir luar napak tanah
+			const flat = F.mul(CFrame.lookAt(center, center.add(radial)));
+			const tilted = flat.mul(CFrame.Angles(-psi, math.rad(rng.NextNumber(-5, 5)), math.rad(rng.NextNumber(-6, 6))));
+			const p = host(ctx, flat.add(upW.mul(-thick / 2 - 0.3)));
+			p.Material = mat;
+			p.Color = col.Lerp(Color3.fromRGB(60, 56, 52), rng.NextNumber(0, 0.18));
+			p.Size = new Vector3(width, thick, depth);
+			p.Transparency = 0;
+			p.CastShadow = ctx.q.tier >= 1;
+			plates.push({
+				p,
+				from: flat.add(upW.mul(-thick / 2 - 0.3)),
+				to: tilted.add(upW.mul((depth / 2) * math.sin(psi) - thick / 2 + 0.06)),
+				delay: ring * 0.025,
+			});
+		}
+	}
+	// Lempeng nongol dari dalam ke luar
+	ctx.tw.add(0.2, (k) => {
+		const t = k * 0.2;
+		for (const pl of plates) pl.p.CFrame = pl.from.Lerp(pl.to, ease("out", math.clamp((t - pl.delay) / 0.12, 0, 1)));
+	});
+	const cool = Color3.fromRGB(28, 24, 26);
+	ctx.tw.add(1.2, (k) => (pit.Color = seam.Lerp(cool, ease("out", k))));
+	if (ctx.q.lights && glow) {
+		const h = host(ctx, new CFrame(C.add(upW)), 2.5);
+		const l = new Instance("PointLight");
+		l.Color = glow;
+		l.Range = 14 * scale;
+		l.Parent = h;
+		ctx.tw.add(2.4, (k) => (l.Brightness = 3 * (1 - k)));
+	}
+	// Habis itu turun lagi + memudar, terus dihapus semua
+	ctx.tw.after(life, () =>
+		ctx.tw.add(
+			0.7,
+			(k) => {
+				const e = ease("in", k);
+				for (const pl of plates) {
+					pl.p.CFrame = pl.to.Lerp(pl.from, e);
+					pl.p.Transparency = e;
+				}
+				pit.Transparency = e;
+			},
+			() => {
+				for (const pl of plates) pl.p.Destroy();
+				pit.Destroy();
+			},
+		),
+	);
+}
+
+/**
+ * Kilatan pedang melesat (garis cahaya tipis) dari `from` ke `to`: kepalanya berkilau, ekornya nyusul di belakang,
+ * makin cepat (gaya "garis tipis di kegelapan" referensi). Habis nyampe langsung hilang.
+ */
+export function streak(ctx: VfxCtx, from: Vector3, to: Vector3, color: Color3, scale = 1, dur = 0.3) {
+	const A = ctx.origin.PointToWorldSpace(from);
+	const B = ctx.origin.PointToWorldSpace(to);
+	const holder = host(ctx, new CFrame(A), dur + 0.6);
+	const tail = att(holder, A);
+	const head = att(holder, A);
+	const core = beamOf(holder, tail, head, { Width0: 0.2 * scale, Width1: 0.9 * scale, Brightness: 5, Color: new ColorSequence(WHITE) });
+	const glow = beamOf(holder, tail, head, {
+		Texture: TEX.glow,
+		TextureMode: Enum.TextureMode.Stretch,
+		Width0: 1.2 * scale,
+		Width1: 5 * scale,
+		Brightness: 2,
+		Color: new ColorSequence(color),
+		Transparency: new NumberSequence(0.25),
+	});
+	// Kilau di kepala: quad tekstur flare, sisinya diarahin ke kanan kamera biar selalu kelihatan penuh
+	const f0 = att(holder, A);
+	const f1 = att(holder, A);
+	const size = 9 * scale;
+	const flare = beamOf(holder, f0, f1, {
+		Texture: TEX.flare,
+		TextureMode: Enum.TextureMode.Stretch,
+		Width0: size,
+		Width1: size,
+		Brightness: 4,
+		Color: new ColorSequence(WHITE, color),
+	});
+	const place = (h: Vector3) => {
+		const [right] = facing(h);
+		f0.WorldPosition = h.sub(right.mul(size / 2));
+		f1.WorldPosition = h.add(right.mul(size / 2));
+	};
+	ctx.tw.add(
+		dur,
+		(k) => {
+			const e = ease("in", k);
+			const h = A.Lerp(B, e);
+			head.WorldPosition = h;
+			tail.WorldPosition = A.Lerp(B, math.max(0, e - 0.6));
+			place(h);
+		},
+		() => {
+			const t0 = tail.WorldPosition;
+			ctx.tw.add(
+				0.22,
+				(k) => {
+					tail.WorldPosition = t0.Lerp(B, ease("out", k));
+					const tr = new NumberSequence(k);
+					core.Transparency = tr;
+					glow.Transparency = new NumberSequence(0.25 + 0.75 * k);
+					flare.Transparency = tr;
+				},
+				() => holder.Destroy(),
+			);
+		},
+	);
+}
+
+/**
+ * Tebasan cahaya raksasa ala donghua: garis tipis menyala dari tengah ke dua ujung, diam sebentar (`delay`), terus
+ * meledak jadi sinar emas tebal (inti putih panas, serat energi mengalir, sinar memancar, percikan, kabut), ditahan
+ * `hold` detik lalu menipis sampai hilang. Ujungnya dilebihin biar kerasa nembus sampai ujung langit.
+ */
+export function cleave(ctx: VfxCtx, from: Vector3, to: Vector3, color: Color3, scale = 1, delay = 0.2, hold = 1) {
+	const A0 = ctx.origin.PointToWorldSpace(from);
+	const B0 = ctx.origin.PointToWorldSpace(to);
+	const len = B0.sub(A0).Magnitude;
+	const dir = B0.sub(A0).Unit;
+	const mid = A0.Lerp(B0, 0.5);
+	const A = mid.sub(dir.mul(len * 0.62));
+	const B = mid.add(dir.mul(len * 0.62));
+	const [, , camN] = facing(mid);
+	const flatN = camN.sub(dir.mul(camN.Dot(dir)));
+	const N = flatN.Magnitude > 0.01 ? flatN.Unit : new Vector3(0, 0, 1);
+	const side = dir.Cross(N).Unit;
+	const rng = new Random();
+	const W = 6 * scale;
+	const total = delay + hold + 1;
+	const holder = host(ctx, new CFrame(mid), total + 0.3);
+	const a0 = att(holder, mid);
+	const a1 = att(holder, mid);
+	const layer = (props: Partial<WritableInstanceProperties<Beam>>) =>
+		beamOf(holder, a0, a1, { Texture: TEX.glow, TextureMode: Enum.TextureMode.Stretch, Segments: 4, ...props });
+	const haze = layer({ Brightness: 1.5, Color: new ColorSequence(EMBER), Transparency: new NumberSequence(1) });
+	const body = layer({ Brightness: 3, Color: new ColorSequence(color) });
+	// Inti putih panas: polos (tajam), ujungnya dipudarin
+	const core = beamOf(holder, a0, a1, { Brightness: 6, Segments: 4, Color: new ColorSequence(WHITE) });
+	const ends = (t: number) => seq([0, 1], [0.1, t], [0.9, t], [1, 1]);
+	const setW = (b: Beam, w: number) => {
+		b.Width0 = w;
+		b.Width1 = w;
+	};
+
+	// Serat energi: tekstur petir yang mengalir sepanjang sinar, tiap serat geser dikit dari sumbu
+	interface Strand {
+		beam: Beam;
+		s0: Attachment;
+		s1: Attachment;
+		off: number;
+		w: number;
+		ph: number;
+	}
+	const strands: Strand[] = [];
+	const ns = ctx.q.tier === 0 ? 2 : ctx.q.tier === 1 ? 3 : 5;
+	for (let i = 0; i < ns; i++) {
+		const s0 = att(holder, mid);
+		const s1 = att(holder, mid);
+		const beam = beamOf(holder, s0, s1, {
+			Texture: TEX.lightning,
+			TextureMode: Enum.TextureMode.Wrap,
+			TextureLength: W * rng.NextNumber(5, 9),
+			TextureSpeed: rng.NextNumber(1.5, 3.2),
+			Brightness: 3,
+			Color: new ColorSequence(i % 2 === 0 ? HOT : color),
+			Transparency: new NumberSequence(1),
+		});
+		strands.push({ beam, s0, s1, off: rng.NextNumber(-0.35, 0.35) * W, w: W * rng.NextNumber(1.2, 2), ph: rng.NextNumber(0, 6) });
+	}
+
+	// Garis tipis dulu: dari tengah ke dua ujung, kedip halus sambil nunggu meledak
+	ctx.tw.add(0.12, (k) => {
+		const e = ease("expoOut", k);
+		a0.WorldPosition = mid.Lerp(A0, e);
+		a1.WorldPosition = mid.Lerp(B0, e);
+	});
+	setW(core, 0.35 * scale);
+	setW(body, 2 * scale);
+	ctx.tw.add(delay, (k) => {
+		core.Transparency = ends(math.random() * 0.25);
+		setW(core, (0.35 + 0.25 * k) * scale);
+	});
+
+	ctx.tw.after(delay, () => {
+		// Meledak: melebar cepat, ujung nembus jauh
+		const pulse = (t: number) => 1 + 0.06 * math.sin(t * 38) + 0.04 * math.sin(t * 61);
+		ctx.tw.add(hold, (k) => {
+			const t = k * hold;
+			const open = ease("expoOut", math.clamp(t / 0.1, 0, 1));
+			a0.WorldPosition = A0.Lerp(A, open);
+			a1.WorldPosition = B0.Lerp(B, open);
+			const p = pulse(t);
+			setW(core, (0.35 * scale + (W * 0.5 - 0.35 * scale) * open) * p);
+			setW(body, (2 * scale + (W * 2.6 - 2 * scale) * open) * p);
+			setW(haze, W * 5 * open);
+			haze.Transparency = new NumberSequence(1 - 0.45 * open);
+			core.Transparency = ends(0);
+			for (const s of strands) {
+				const wob = math.sin(t * 9 + s.ph) * W * 0.12;
+				const o = side.mul((s.off + wob) * open);
+				s.s0.WorldPosition = a0.WorldPosition.add(o);
+				s.s1.WorldPosition = a1.WorldPosition.add(o);
+				setW(s.beam, s.w * open);
+				s.beam.Transparency = ends(0.15 + 0.2 * math.random());
+			}
+		});
+
+		// Sinar memancar dari garis tebasan, condong ke kamera
+		const rays: Beam[] = [];
+		if (ctx.q.tier >= 1) {
+			const nr = ctx.q.tier === 2 ? 10 : 6;
+			for (let i = 0; i < nr; i++) {
+				const P = A0.Lerp(B0, rng.NextNumber(0.12, 0.88));
+				const d = side
+					.mul(i % 2 === 0 ? 1 : -1)
+					.add(N.mul(0.35))
+					.add(dir.mul(rng.NextNumber(-0.3, 0.3))).Unit;
+				const L = W * rng.NextNumber(4, 7);
+				rays.push(
+					beamOf(holder, att(holder, P.sub(d.mul(L * 0.25))), att(holder, P.add(d.mul(L))), {
+						Texture: TEX.glow,
+						TextureMode: Enum.TextureMode.Stretch,
+						Width0: W * 0.5,
+						Width1: W * 1.6,
+						Brightness: 1.5,
+						Color: new ColorSequence(Color3.fromRGB(255, 214, 150)),
+						Transparency: new NumberSequence(1),
+					}),
+				);
+			}
+		}
+		ctx.tw.add(0.9, (k) => {
+			const tr = seq([0, 1], [0.2, 0.45 + 0.55 * ease("in", k)], [1, 1]);
+			for (const r of rays) r.Transparency = tr;
+		});
+
+		// Percikan + kabut di sepanjang garis
+		const box = host(ctx, CFrame.lookAt(mid, B0), hold + 2);
+		box.Size = new Vector3(W, W, len);
+		const sparks = emitter(ctx, box, {
+			Texture: TEX.spark,
+			Shape: Enum.ParticleEmitterShape.Box,
+			ShapeStyle: Enum.ParticleEmitterShapeStyle.Volume,
+			Color: new ColorSequence(WHITE, color),
+			Size: seq([0, 0.9 * scale], [1, 0]),
+			Lifetime: new NumberRange(0.5, 1.1),
+			Speed: new NumberRange(8 * scale, 30 * scale),
+			SpreadAngle: new Vector2(180, 180),
+			Drag: 2.5,
+			Acceleration: new Vector3(0, -6, 0),
+			Rate: 90 * ctx.q.particles,
+		});
+		sparks.Emit(count(ctx, 140));
+		sparks.Enabled = true;
+		ctx.tw.after(hold, () => (sparks.Enabled = false));
+		if (ctx.q.tier >= 1) {
+			emitter(ctx, box, {
+				Texture: TEX.smokeFlip,
+				FlipbookLayout: Enum.ParticleFlipbookLayout.Grid4x4,
+				FlipbookMode: Enum.ParticleFlipbookMode.OneShot,
+				Shape: Enum.ParticleEmitterShape.Box,
+				ShapeStyle: Enum.ParticleEmitterShapeStyle.Volume,
+				Color: new ColorSequence(Color3.fromRGB(255, 232, 196)),
+				LightEmission: 0.4,
+				Size: seq([0, 6 * scale], [1, 18 * scale]),
+				Transparency: seq([0, 0.5], [1, 1]),
+				Lifetime: new NumberRange(1, 1.6),
+				Speed: new NumberRange(2, 6),
+				SpreadAngle: new Vector2(180, 180),
+				Rotation: new NumberRange(0, 360),
+			}).Emit(count(ctx, 26));
+		}
+		if (ctx.q.lights) {
+			const l = new Instance("PointLight");
+			l.Color = color;
+			l.Range = 60;
+			l.Parent = holder;
+			ctx.tw.add(hold + 0.9, (k) => (l.Brightness = 10 * (1 - k)));
+		}
+
+		// Menipis jadi garis, terus hilang
+		ctx.tw.after(hold, () =>
+			ctx.tw.add(0.9, (k) => {
+				const e = ease("in", k);
+				const tr = ends(e);
+				setW(core, W * 0.5 * (1 - 0.85 * e));
+				setW(body, W * 2.6 * (1 - 0.85 * e));
+				setW(haze, W * 5 * (1 - 0.5 * e));
+				core.Transparency = tr;
+				body.Transparency = tr;
+				haze.Transparency = new NumberSequence(0.55 + 0.45 * e);
+				const st = ends(math.clamp(e * 1.8, 0, 1));
+				for (const s of strands) s.beam.Transparency = st;
+			}),
 		);
 	});
+}
+
+/**
+ * Energi ngumpul ke ujung pedang sebelum tebasan besar: butiran cahaya ketarik masuk dari bola besar,
+ * pusaran berputar makin besar. `at` dipanggil tiap frame biar ngikutin pedang.
+ */
+export function charge(ctx: VfxCtx, at: () => Vector3 | undefined, dur: number, color: Color3, scale = 1) {
+	const P = at();
+	if (!P) return;
+	const R = 9 * scale;
+	const shell = host(ctx, new CFrame(P), dur + 0.8);
+	shell.Shape = Enum.PartType.Ball;
+	shell.Size = new Vector3(R * 2, R * 2, R * 2);
+	const motes = emitter(ctx, shell, {
+		Texture: TEX.glow,
+		Shape: Enum.ParticleEmitterShape.Sphere,
+		ShapeStyle: Enum.ParticleEmitterShapeStyle.Surface,
+		ShapeInOut: Enum.ParticleEmitterShapeInOut.Inward,
+		Orientation: Enum.ParticleOrientation.VelocityParallel,
+		Squash: seq([0, 2], [1, 2]),
+		Color: new ColorSequence(color, WHITE),
+		Size: seq([0, 0.15 * scale], [0.7, 0.45 * scale], [1, 0]),
+		Transparency: seq([0, 1], [0.25, 0.1], [1, 0]),
+		Lifetime: new NumberRange(0.5),
+		Speed: new NumberRange(R / 0.5),
+		Rate: 90 * ctx.q.particles,
+	});
+	motes.Enabled = true;
+	if (ctx.q.tier >= 1) {
+		emitter(ctx, shell, {
+			Texture: TEX.swirl,
+			LockedToPart: true,
+			Color: new ColorSequence(color),
+			Size: seq([0, 1 * scale], [1, 5 * scale]),
+			Transparency: seq([0, 1], [0.3, 0.35], [0.85, 0.5], [1, 1]),
+			Lifetime: new NumberRange(dur),
+			Rotation: new NumberRange(0, 360),
+			RotSpeed: new NumberRange(-420),
+		}).Emit(1);
+	}
+	ctx.tw.add(
+		dur,
+		() => {
+			const p = at();
+			if (p) shell.CFrame = new CFrame(p);
+		},
+		() => (motes.Enabled = false),
+	);
 }
 
 /** Serpihan pedang yang masih dijepit (melayang pelan, bercahaya) sampai `life` detik. */

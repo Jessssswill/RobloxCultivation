@@ -1,4 +1,4 @@
-// Cutscene 1 (Prolog, 90 dtk timeline, sekitar 97 dtk asli karena slow-mo):
+// Cutscene 1 (Prolog, 90 dtk timeline, sekitar 98 dtk asli karena slow-mo):
 // Bai Wuji lawan pasukan langit di Pilar Kesembilan, ditahan sosok diam pakai dua jari, pedang patah,
 // serpihan jatuh menembus awan ke dunia fana. Set dibikin lokal di langit, jauh dari map, detail ikut tier grafik.
 // Dialog Inggris + Mandarin (diucapin TTS). Musik orkestra China tanpa vokal (lihat audio.ts).
@@ -22,6 +22,8 @@ const BANNER = Color3.fromRGB(150, 28, 26);
 const BOLT = Color3.fromRGB(225, 232, 255);
 /** Tepi retakan / sobekan ruang: putih keunguan, beda sama qi biru Bai Wuji. */
 const VOIDRIM = Color3.fromRGB(205, 190, 255);
+/** Cahaya hangat di balik retakan langit pas tebasan raksasa (gaya referensi: inti putih, pinggir oranye emas). */
+const FLAME = Color3.fromRGB(255, 168, 78);
 
 const v = (x: number, y: number, z: number) => new Vector3(x, y, z);
 /** CFrame telapak kaki di (x, y, z) menghadap titik (lx, lz) pada ketinggian yang sama. */
@@ -327,12 +329,25 @@ const camera: CamKey[] = [
 	// S7 27-31: tebasan putar, dari atas serong
 	{ t: 27, pos: v(9, 11, 9), look: v(0, 2, 0), fov: 60, cut: true },
 	{ t: 31, pos: v(12, 7, -6), look: v(0, 3, 0), fov: 62, ease: "inOut" },
-	// S8 31-34: lompat ke langit, kamera di tanah ngikutin
+	// S8 31-33.55: lompat ke langit, kamera di tanah ngikutin
 	{ t: 31, pos: v(6, 1.5, 9), track: "bai", look: v(0, 0, 0), fov: 60, dof: 0.1, cut: true },
-	{ t: 34, pos: v(8, 3, 14), track: "bai", look: v(0, 0, 0), fov: 72, ease: "out" },
-	// S9 34-37: tebasan raksasa ke pasukan, lebar dari belakang
-	{ t: 34, follow: "bai", pos: v(-6, 3, 16), look: v(0, 45, -150), fov: 75, cut: true },
-	{ t: 37, follow: "bai", pos: v(-9, 5, 20), look: v(0, 42, -150), fov: 80, ease: "out" },
+	{ t: 33.55, pos: v(7.5, 2.6, 12.5), track: "bai", look: v(0, 0, 0), fov: 70, ease: "out" },
+	// S9 33.55-37: tebasan raksasa, montase gaya donghua (referensi Swallowed Star), tiap shot pendek
+	// 9a: dekat dari depan bawah. Sayap kristal mekar, energi ngumpul ke pedang, nebas
+	{ t: 33.55, follow: "bai", pos: v(3.4, -1.4, -6.8), track: "bai", look: v(0, 2, 0), fov: 42, dof: 0.3, cut: true },
+	{ t: 34.33, follow: "bai", pos: v(2.6, -1, -5.6), track: "bai", look: v(0, 1.6, 0), fov: 38, dof: 0.3, ease: "in" },
+	// 9b: lebar dari belakang Bai. Kilatan pedang melesat, garis tipis di langit, meledak jadi sinar emas, langit retak
+	{ t: 34.33, follow: "bai", pos: v(-7, 3.5, 15), look: v(0, 50, -150), fov: 72, cut: true },
+	{ t: 35.12, follow: "bai", pos: v(-8, 4, 17), look: v(0, 49, -150), fov: 76, ease: "out" },
+	// 9c: dari pinggir pasukan nyusur sinar (diagonal di layar), retakan menjalar, pasukan rontok
+	{ t: 35.12, pos: v(-80, 41, -102), look: v(15, 52, -150), fov: 60, roll: -12, cut: true },
+	{ t: 35.62, pos: v(-74, 42, -106), look: v(20, 50, -150), fov: 56, roll: -9, ease: "out" },
+	// 9d: balik arah, lensa tele: Bai kecil di tengah langit yang retak
+	{ t: 35.62, pos: v(30, 85, -214), track: "bai", look: v(0, 1, 0), fov: 20, cut: true },
+	{ t: 36.25, pos: v(27, 83, -210), track: "bai", look: v(0, 1, 0), fov: 18, ease: "inOut" },
+	// 9e: lebar lagi dari belakang, sinar menipis, retakan meredup
+	{ t: 36.25, follow: "bai", pos: v(-15, 9, 24), look: v(0, 46, -150), fov: 80, cut: true },
+	{ t: 37, follow: "bai", pos: v(-17, 11, 28), look: v(0, 45, -150), fov: 82, ease: "out" },
 	// S10 37-41: melayang di langit yang kosong
 	{ t: 37, follow: "bai", pos: v(7, 0.5, -8), track: "bai", look: v(0, 1, 0), fov: 45, dof: 0.4, cut: true },
 	{ t: 41, follow: "bai", pos: v(-7, 1, -8), track: "bai", look: v(0, 1, 0), fov: 45, dof: 0.4, ease: "inOut" },
@@ -377,7 +392,6 @@ const events: CutEvent[] = [
 	{ t: 0.2, kind: "fade", to: 0, dur: 3 },
 	// Orkestra China tanpa vokal, dipotong dari detik 22.8 biar klimaksnya jatuh pas tebasan raksasa
 	{ t: 0, kind: "music", name: "prologWar", volume: 0.55, fade: 3, from: 22.8 },
-	{ t: 0, kind: "sfx", name: "wind", volume: 0.16, loop: true },
 	...each(soldiers, (id) => ({ t: 0, kind: "pose", actor: id, pose: "attention", dur: 0 })),
 	// Sosok Diam gak pernah napas atau goyang sedikit pun
 	{ t: 0, kind: "still", actor: "figure", on: true },
@@ -425,7 +439,7 @@ const events: CutEvent[] = [
 	{ t: 23.75, kind: "pose", actor: "bai", pose: "slashFollow", dur: 0.12, ease: "back" },
 	{ t: 23.75, kind: "move", actor: "bai", to: at(0, 0, -1.6, 0, -100), dur: 0.14, ease: "expoOut", ghost: true },
 	{ t: 23.75, kind: "sfx", name: "slash", volume: 0.9 },
-	{ t: 23.75, kind: "vfx", name: "slash", at: v(-7, 4.5, -5), to: v(7, 2.5, -6), color: QI, style: "ink" },
+	{ t: 23.75, kind: "vfx", name: "slash", at: v(-7, 4.5, -5), to: v(7, 2.5, -6), color: QI },
 	// Ruang ikut kesobek di jalur tebasan
 	{ t: 23.78, kind: "vfx", name: "rift", at: v(-7, 4.5, -5.4), to: v(7, 2.5, -6.4), color: VOIDRIM, scale: 0.6, life: 0.7 },
 	{ t: 23.8, kind: "impact", strength: 1 },
@@ -456,8 +470,8 @@ const events: CutEvent[] = [
 	{ t: 29.1, kind: "sfx", name: "slash", volume: 0.9, pitch: 1.1 },
 	{ t: 29.1, kind: "sfx", name: "whoosh", volume: 0.5, pitch: 1.2 },
 	{ t: 29.1, kind: "vfx", name: "ring", at: v(0, 3, 0), scale: 22, color: QI },
-	{ t: 29.15, kind: "vfx", name: "slash", at: v(-5, 3.5, 3), to: v(-5, 2.5, -4), color: QI, style: "ink" },
-	{ t: 29.2, kind: "vfx", name: "slash", at: v(5, 3, -4), to: v(4, 3.5, 4), color: QI, style: "ink" },
+	{ t: 29.15, kind: "vfx", name: "slash", at: v(-5, 3.5, 3), to: v(-5, 2.5, -4), color: QI },
+	{ t: 29.2, kind: "vfx", name: "slash", at: v(5, 3, -4), to: v(4, 3.5, 4), color: QI },
 	{ t: 29.25, kind: "impact", strength: 1.2 },
 	{ t: 29.25, kind: "vfx", name: "burst", at: v(-4, 3, -1), color: GOLD },
 	{ t: 29.27, kind: "vfx", name: "burst", at: v(4, 3, -1), color: GOLD },
@@ -478,20 +492,33 @@ const events: CutEvent[] = [
 	{ t: 31.6, kind: "pose", actor: "bai", pose: "leapTuck", dur: 0.25, ease: "out" },
 	{ t: 31.6, kind: "move", actor: "bai", to: at(0, 35, -30, 0, -200), dur: 1.6, ease: "expoOut", ghost: true, spin: -360 },
 	{ t: 31.6, kind: "vfx", name: "debris", at: v(0, 0, 0) },
-	{ t: 31.6, kind: "vfx", name: "cracks", at: v(0, 0, 0), scale: 1.2, color: QI },
+	{ t: 31.6, kind: "vfx", name: "cracks", at: v(0, 0, 0), scale: 1.2, color: QI, life: 2 },
 	{ t: 31.6, kind: "vfx", name: "ring", at: v(0, 0.3, 0), scale: 30, color: SALT },
 	{ t: 31.65, kind: "shake", mag: 0.8, dur: 0.5 },
 	{ t: 32.6, kind: "pose", actor: "bai", pose: "hover", dur: 0.8, ease: "inOut" },
+	// Gaya referensi: sayap kristal emas, energi ngumpul, garis cahaya tipis melesat, diam sepersekian detik, terus
+	// meledak jadi sinar emas raksasa yang nyobek langit (retakan kayak petir, sinar bocor, pecahan kaca)
 	{ t: 33.3, kind: "pose", actor: "bai", pose: "overhead", dur: 0.45, ease: "out" },
 	{ t: 33.3, kind: "wings", actor: "bai", on: true },
+	{ t: 33.3, kind: "sfx", name: "whoosh", volume: 0.5, pitch: 0.7 },
 	{ t: 33.35, kind: "glint", actor: "bai" },
+	{ t: 33.35, kind: "lines", dur: 1 },
+	{ t: 33.5, kind: "charge", actor: "bai", dur: 0.8, color: GOLD },
 	{ t: 34.3, kind: "pose", actor: "bai", pose: "downSlash", dur: 0.14, ease: "back" },
 	{ t: 34.3, kind: "sfx", name: "bigSlash", volume: 1 },
-	{ t: 34.3, kind: "vfx", name: "wave", at: v(0, 36.5, -33), to: v(0, 48, -150), scale: 1.2, dur: 0.5, color: QI, style: "ink" },
-	{ t: 34.8, kind: "vfx", name: "slash", at: v(-90, 75, -150), to: v(90, 35, -150), dur: 1.2, color: QI, style: "ink" },
-	{ t: 34.82, kind: "vfx", name: "rift", at: v(-90, 75, -150), to: v(90, 35, -150), color: VOIDRIM, life: 2.2 },
+	{ t: 34.3, kind: "grade", to: { Brightness: -0.12, Contrast: 0.35, Saturation: -0.15, TintColor: Color3.fromRGB(226, 222, 255) }, dur: 0.15 },
+	{ t: 34.3, kind: "vfx", name: "slash", at: v(-3.5, 41.5, -31), to: v(3, 33.5, -34), scale: 1.2, dur: 0.35, color: GOLD },
+	{ t: 34.32, kind: "vfx", name: "streak", at: v(0, 37.5, -33), to: v(0, 55, -150), dur: 0.28, color: GOLD },
+	{ t: 34.6, kind: "vfx", name: "cleave", at: v(-90, 75, -150), to: v(90, 35, -150), scale: 1.3, dur: 0.2, life: 1, color: GOLD },
+	{ t: 34.8, kind: "fade", to: 0.55, dur: 0.03, color: WHITE },
+	{ t: 34.83, kind: "fade", to: 0, dur: 0.35, color: WHITE },
+	{ t: 34.82, kind: "vfx", name: "rift", at: v(-90, 75, -150), to: v(90, 35, -150), color: FLAME, life: 2.4 },
+	{ t: 34.86, kind: "vfx", name: "spaceCrack", at: v(-40, 64, -152), scale: 3, color: FLAME, life: 2 },
+	{ t: 34.92, kind: "vfx", name: "spaceCrack", at: v(45, 46, -148), scale: 2.6, color: FLAME, life: 1.9 },
 	{ t: 34.8, kind: "impact", strength: 1.6 },
 	{ t: 34.8, kind: "sfx", name: "boom", volume: 0.8 },
+	{ t: 34.82, kind: "sfx", name: "thunder", volume: 0.5 },
+	{ t: 34.95, kind: "sfx", name: "shatter", volume: 0.35 },
 	{ t: 34.8, kind: "vfx", name: "collapse", at: v(0, 40, -60), target: "Army", dur: 2.6 },
 	{ t: 34.85, kind: "vfx", name: "burst", at: v(0, 58, -100), scale: 2, color: GOLD },
 	{ t: 34.85, kind: "knock", actor: "commander", dir: v(0, 0.3, -1), power: 70 },
@@ -499,9 +526,11 @@ const events: CutEvent[] = [
 	{ t: 35, kind: "vfx", name: "burst", at: v(10, 48, -165), scale: 4, color: GOLD },
 	{ t: 35.1, kind: "vfx", name: "burst", at: v(40, 42, -150), scale: 4, color: GOLD },
 	{ t: 34.9, kind: "shake", mag: 1.4, dur: 1.2 },
-	{ t: 35.1, kind: "speed", scale: 0.4 },
-	{ t: 35.6, kind: "wings", actor: "bai", on: false },
+	// Slow-mo mulai pas habis kilatan putih, biar ledakan sinarnya lama kelihatan (klimaks musik tetap di 34.8)
+	{ t: 34.88, kind: "speed", scale: 0.4 },
 	{ t: 36, kind: "speed", scale: 1 },
+	{ t: 36.4, kind: "grade", to: BASE_GRADE, dur: 1.2 },
+	{ t: 36.5, kind: "wings", actor: "bai", on: false },
 	{ t: 36.5, kind: "pose", actor: "bai", pose: "hover", dur: 1.4, ease: "inOut" },
 	{ t: 37, kind: "aura", actor: "bai", on: false },
 	{ t: 37, kind: "hide", actor: "commander" },
@@ -534,8 +563,7 @@ const events: CutEvent[] = [
 	{ t: 47.05, kind: "speed", scale: 0.12 },
 	{ t: 47.3, kind: "music", name: "none", fade: 0.8 },
 	{ t: 47.6, kind: "speed", scale: 1 },
-	// Waktu seakan berhenti: warna hampir hilang, angin ikut hening, ruang di belakang jari retak makin lebar tiap bunyi retak
-	{ t: 47.6, kind: "sfx", name: "wind", volume: 0, fade: 0.6 },
+	// Waktu seakan berhenti: warna hampir hilang, hening total, ruang di belakang jari retak makin lebar tiap bunyi retak
 	{ t: 47.65, kind: "grade", to: { Saturation: -0.9, Contrast: 0.35 }, dur: 0.25 },
 	{ t: 47.65, kind: "freeze", on: true },
 	{ t: 47.65, kind: "vfx", name: "spaceCrack", at: PINCH_CRACK, scale: 0.36, color: VOIDRIM, stages: [1.85, 3.85], life: 6.35 },
@@ -555,7 +583,6 @@ const events: CutEvent[] = [
 	{ t: 54, kind: "freeze", on: false },
 	{ t: 54, kind: "aura", actor: "bai", on: false },
 	{ t: 54, kind: "sfx", name: "shatter", volume: 1 },
-	{ t: 54.3, kind: "sfx", name: "wind", volume: 0.16, fade: 2 },
 	{ t: 54, kind: "sfx", name: "boom", volume: 0.7, pitch: 0.8 },
 	{ t: 54, kind: "impact", strength: 2 },
 	{ t: 54, kind: "pose", actor: "bai", pose: "fallBack", dur: 0.15, ease: "out" },
@@ -566,7 +593,7 @@ const events: CutEvent[] = [
 	{ t: 54.8, kind: "speed", scale: 1 },
 	{ t: 55.2, kind: "move", actor: "bai", to: at(0, 0, 12, 0, -100), dur: 1.3, ease: "in" },
 	{ t: 56.5, kind: "vfx", name: "debris", at: v(0, 0, 12) },
-	{ t: 56.5, kind: "vfx", name: "cracks", at: v(0, 0, 12), scale: 1.3, color: QI },
+	{ t: 56.5, kind: "vfx", name: "cracks", at: v(0, 0, 12), scale: 1.3, color: QI, life: 20 },
 	{ t: 56.5, kind: "vfx", name: "ring", at: v(0, 0.3, 12), scale: 30, color: SALT },
 	{ t: 56.5, kind: "shake", mag: 1, dur: 0.6 },
 	{ t: 56.5, kind: "sfx", name: "thud", volume: 0.8 },

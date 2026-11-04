@@ -500,6 +500,11 @@ export class CutsceneRun {
 				if (actor) this.tw.add(on ? 0.3 : 0.6, (k) => actor.setWings(on ? k : 1 - k));
 				break;
 			}
+			case "charge": {
+				const actor = this.actors.get(e.actor);
+				if (actor) vfx.charge(this.ctx, () => actor.bladeTip(), e.dur, e.color ?? QI, e.scale ?? 1);
+				break;
+			}
 			case "glint": {
 				const tip = this.actors.get(e.actor)?.bladeTip();
 				if (tip) vfx.glint(this.ctx, tip, QI);
@@ -618,7 +623,13 @@ export class CutsceneRun {
 				vfx.lightning(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1);
 				break;
 			case "cracks":
-				vfx.cracks(this.ctx, e.at, e.scale ?? 1, e.color);
+				vfx.cracks(this.ctx, e.at, e.scale ?? 1, e.color, e.life ?? 1.8);
+				break;
+			case "streak":
+				vfx.streak(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.3);
+				break;
+			case "cleave":
+				vfx.cleave(this.ctx, e.at, e.to ?? e.at, color, e.scale ?? 1, e.dur ?? 0.2, e.life ?? 1);
 				break;
 			case "spaceCrack":
 				vfx.spaceCrack(this.ctx, e.at, e.scale ?? 1, color, e.stages ?? [], e.shatter, e.life ?? 3);

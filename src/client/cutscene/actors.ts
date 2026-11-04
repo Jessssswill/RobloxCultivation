@@ -144,6 +144,28 @@ function paint(model: Model, color: Color3, material: Enum.Material, silhouette:
 	}
 }
 
+/** Satu bilah sayap kristal: dua wedge kaca (segitiga sama kaki) + tulang cahaya di tengahnya. */
+interface WingBlade {
+	parts: BasePart[];
+	welds: Weld[];
+	side: number;
+	theta: number;
+	len: number;
+	w: number;
+	delay: number;
+}
+
+interface WingRig {
+	folder: Folder;
+	blades: WingBlade[];
+	dust: ParticleEmitter[];
+	s: number;
+}
+
+/** Warna sayap kristal: kaca emas + tulang cahaya emas pucat. */
+const WING_GLASS = Color3.fromRGB(255, 210, 120);
+const WING_CORE = Color3.fromRGB(255, 238, 180);
+
 export class Actor {
 	readonly model: Model;
 	readonly root: BasePart;
@@ -203,6 +225,10 @@ export class Actor {
 	private swordFx: Array<ParticleEmitter | PointLight> = [];
 	private bladeGlow?: BasePart;
 	private wings?: BasePart;
+	private wingRig?: WingRig;
+	private wingA = 0;
+	private tier: number;
+	private particles: number;
 	private tipAtt?: Attachment;
 	private baseAtt?: Attachment;
 	private auraOn = false;
@@ -227,6 +253,8 @@ export class Actor {
 		this.origin = origin;
 		this.ghostColor = def.ghostColor ?? QI;
 		this.seed = new Random().NextNumber(0, 100);
+		this.tier = q.tier;
+		this.particles = q.particles;
 		model.Name = `Actor_${def.id}`;
 
 		for (const d of model.GetDescendants()) {
@@ -410,6 +438,19 @@ export class Actor {
 			return false;
 		}
 		sword.PrimaryPart = handle;
+		// Pengaman: las yang ujungnya kosong (nunjuk ke part yang gak ada di client) diganti las ke Handle,
+		// posisi relatif tetap. Tanpa ini bilah lepas dan jatuh
+		for (const d of sword.GetDescendants()) {
+			if (!d.IsA("JointInstance") && !d.IsA("WeldConstraint")) continue;
+			if (d.Part0 && d.Part1) continue;
+			const part = d.Part1 ?? d.Part0 ?? (d.Parent && d.Parent.IsA("BasePart") ? d.Parent : undefined);
+			d.Destroy();
+			if (!part || part === handle) continue;
+			const fix = new Instance("WeldConstraint");
+			fix.Part0 = handle;
+			fix.Part1 = part;
+			fix.Parent = part;
+		}
 		pcall(() => sword.ScaleTo(scale));
 		const gripAtt = hand.FindFirstChild("RightGripAttachment") as Attachment | undefined;
 		const gripPos = gripAtt ? gripAtt.Position : new Vector3(0, -0.17, 0);
@@ -631,9 +672,131 @@ export class Actor {
 		track.Play(0.1, 1, speed);
 	}
 
-	/** Sayap cahaya di pangkal pedang: 0 hilang, 1 penuh. */
+	/**
+	 * Sayap: 0 kuncup + hilang, 1 mekar penuh. Pedang lama yang punya LightWings tetap pakai itu; selain itu
+	 * sayap kristal emas di punggung (bilah kaca emas bertulang cahaya, mekar kayak kipas dari atas ke bawah).
+	 */
 	setWings(a: number) {
-		if (this.wings) this.wings.Transparency = 1 - 0.85 * math.clamp(a, 0, 1);
+		if (this.wings) {
+			this.wings.Transparency = 1 - 0.85 * math.clamp(a, 0, 1);
+			return;
+		}
+		if (!this.wingRig) {
+			if (a <= 0) return;
+			this.wingRig = this.buildWings();
+		}
+		this.wingA = math.clamp(a, 0, 1);
+		for (const e of this.wingRig.dust) e.Enabled = this.wingA > 0.5;
+		this.poseWings(this.lastNow);
+	}
+
+	private buildWings(): WingRig {
+		const torso = (this.model.FindFirstChild("UpperTorso") as BasePart | undefined) ?? this.root;
+		const s = this.root.Size.Y / 2;
+		// Di luar model biar gak ikut outline Highlight, tapi tetap dilas ke badan
+		const folder = new Instance("Folder");
+		folder.Name = "CrystalWings";
+		folder.Parent = this.parent;
+		const n = this.tier === 2 ? 6 : this.tier === 1 ? 5 : 4;
+		const lens = [0.86, 1, 0.92, 0.78, 0.62, 0.48];
+		const blades: WingBlade[] = [];
+		const dust: ParticleEmitter[] = [];
+		for (const side of [1, -1]) {
+			for (let i = 0; i < n; i++) {
+				const k = i / (n - 1);
+				const make = (cls: "WedgePart" | "Part", material: Enum.Material, color: Color3) => {
+					const p = new Instance(cls);
+					p.Name = "Wing";
+					p.Anchored = false;
+					p.CanCollide = false;
+					p.CanQuery = false;
+					p.CanTouch = false;
+					p.Massless = true;
+					p.CastShadow = false;
+					p.Material = material;
+					p.Color = color;
+					p.Transparency = 1;
+					p.Parent = folder;
+					const w = new Instance("Weld");
+					w.Part0 = torso;
+					w.Part1 = p;
+					w.Parent = p;
+					return [p, w] as const;
+				};
+				const [upper, w0] = make("WedgePart", Enum.Material.Glass, WING_GLASS);
+				const [lower, w1] = make("WedgePart", Enum.Material.Glass, WING_GLASS);
+				const [spine, w2] = make("Part", Enum.Material.Neon, WING_CORE);
+				upper.Reflectance = 0.15;
+				lower.Reflectance = 0.15;
+				const idx = math.floor(k * (lens.size() - 1) + 0.5);
+				blades.push({
+					parts: [upper, lower, spine],
+					welds: [w0, w1, w2],
+					side,
+					theta: math.rad(14 + k * 104),
+					len: 7.5 * s * lens[idx] * (this.tier === 0 ? 0.85 : 1),
+					w: 1.05 * s * (1 - 0.3 * k),
+					delay: i * 0.07,
+				});
+				// Serbuk emas jatuh dari dua bilah paling atas
+				if (i < 2 && this.tier >= 1) {
+					const e = new Instance("ParticleEmitter");
+					e.Texture = TEX.glow;
+					e.Shape = Enum.ParticleEmitterShape.Box;
+					e.Color = new ColorSequence(WING_CORE, WING_GLASS);
+					e.LightEmission = 1;
+					e.LightInfluence = 0;
+					e.Size = new NumberSequence([new NumberSequenceKeypoint(0, 0.25 * s), new NumberSequenceKeypoint(1, 0)]);
+					e.Transparency = new NumberSequence([new NumberSequenceKeypoint(0, 0.2), new NumberSequenceKeypoint(1, 1)]);
+					e.Lifetime = new NumberRange(0.8, 1.4);
+					e.Speed = new NumberRange(0.5, 2);
+					e.SpreadAngle = new Vector2(180, 180);
+					e.Acceleration = new Vector3(0, -3, 0);
+					e.Rate = math.floor(25 * this.particles);
+					e.Enabled = false;
+					e.Parent = spine;
+					dust.push(e);
+					this.fx.push(e);
+					this.onEmitter?.(e);
+				}
+			}
+		}
+		return { folder, blades, dust, s };
+	}
+
+	/** Atur sudut, panjang, dan bening tiap bilah dari wingA (mekar berurutan) + kepak halus biar hidup. */
+	private poseWings(now: number) {
+		const rig = this.wingRig;
+		if (!rig) return;
+		const s = rig.s;
+		const back = new Vector3(0, 0, 1);
+		const maxDelay = rig.blades.reduce((m, b) => math.max(m, b.delay), 0);
+		const sweep = math.rad(28);
+		for (const b of rig.blades) {
+			const e = ease("out", math.clamp((this.wingA - b.delay) / math.max(1 - maxDelay, 0.1), 0, 1));
+			const flap = math.sin(now * 2.2 + b.theta * 3) * math.rad(3) * e;
+			const theta = math.rad(168) + (b.theta - math.rad(168)) * e + flap;
+			const len = b.len * (0.45 + 0.55 * e);
+			// Arah bilah di ruang badan: menyebar ke samping dari atas ke bawah, condong ke belakang
+			const dir = new Vector3(b.side * math.sin(theta) * math.cos(sweep), math.cos(theta) * math.cos(sweep), math.sin(sweep));
+			const base = new Vector3(b.side * 0.42 * s, 0.38 * s, 0.5 * s);
+			const zAxis = dir.mul(-1);
+			const xAxis = back.sub(dir.mul(back.Dot(dir))).Unit;
+			const yAxis = zAxis.Cross(xAxis);
+			const cf = CFrame.fromMatrix(base.add(dir.mul(len / 2)), xAxis, yAxis, zAxis);
+			const t = 0.08 * s;
+			const [upper, lower, spine] = b.parts;
+			upper.Size = new Vector3(t, b.w / 2, len);
+			lower.Size = new Vector3(t, b.w / 2, len);
+			spine.Size = new Vector3(t * 1.6, b.w * 0.09, len * 0.92);
+			b.welds[0].C0 = cf.mul(new CFrame(0, b.w / 4, 0));
+			b.welds[1].C0 = cf.mul(new CFrame(0, -b.w / 4, 0)).mul(CFrame.Angles(0, 0, math.pi));
+			b.welds[2].C0 = cf.mul(new CFrame(0, 0, len * 0.04));
+			const glass = e <= 0.001 ? 1 : 1 - 0.65 * e;
+			upper.Transparency = glass;
+			lower.Transparency = glass;
+			spine.Transparency = e <= 0.001 ? 1 : 1 - 0.95 * e;
+		}
 	}
 
 	bladeTip(): Vector3 | undefined {
@@ -690,6 +853,7 @@ export class Actor {
 		if (this.qiTrail && this.qiTrail.Enabled && now > this.trailOff) this.qiTrail.Enabled = false;
 		this.updateJoints(now, dt);
 		this.updateSway(now, dt);
+		if (this.wingRig && this.wingA > 0) this.poseWings(now);
 	}
 
 	private updateRoot(now: number, dt: number) {
@@ -868,6 +1032,7 @@ export class Actor {
 	}
 
 	destroy() {
+		this.wingRig?.folder.Destroy();
 		this.model.Destroy();
 	}
 }

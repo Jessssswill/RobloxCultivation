@@ -90,8 +90,10 @@ export type CutEvent = At &
 		| { kind: "move"; actor: string; to: CFrame; dur: number; ease?: Ease; ghost?: boolean; spin?: number; flip?: number }
 		/** Terhempas: melayang balistik + berputar, terus luruh jadi debu cahaya selama `fade` detik (kalau diisi). */
 		| { kind: "knock"; actor: string; dir: Vector3; power?: number; fade?: number }
-		/** Sayap cahaya di pangkal pedang mesh (LightWings) mekar / redup. */
+		/** Sayap kristal emas di punggung mekar / kuncup (kalau pedangnya punya LightWings, itu yang dipakai). */
 		| { kind: "wings"; actor: string; on: boolean }
+		/** Energi ngumpul ke ujung pedang selama `dur` detik (butiran ketarik masuk + pusaran). */
+		| { kind: "charge"; actor: string; dur: number; color?: Color3; scale?: number }
 		/** Kilau bintang di ujung pedang. */
 		| { kind: "glint"; actor: string }
 		/** Diam total (gak napas, gak goyang, gak mantul). Buat Sosok Diam dan momen waktu berhenti. */
@@ -115,7 +117,9 @@ export type CutEvent = At &
 					| "cracks"
 					| "spaceCrack"
 					| "rift"
-					| "shard";
+					| "shard"
+					| "streak"
+					| "cleave";
 				at: Vector3;
 				to?: Vector3;
 				/** Titik kontrol kurva buat fall (Bezier). */
@@ -133,7 +137,10 @@ export type CutEvent = At &
 				stages?: number[];
 				/** spaceCrack: detik (sejak muncul) ruangnya pecah kayak kaca. */
 				shatter?: number;
-				/** spaceCrack / rift / shard: berapa lama bertahan sebelum menutup / hilang. */
+				/**
+				 * spaceCrack / rift / shard / cracks: berapa lama bertahan sebelum menutup / hilang.
+				 * cleave: berapa lama sinar ditahan setelah meledak (`dur` = jeda garis tipis sebelum meledak).
+				 */
 				life?: number;
 		  }
 		/** SFX. Kalau loop dengan nama ini lagi jalan, event ini cuma ngubah volumenya pelan-pelan (`fade` detik), misal angin hening pas waktu berhenti. */

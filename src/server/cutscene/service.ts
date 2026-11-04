@@ -239,12 +239,16 @@ function copyWeapon(name: string, from: string): Model | undefined {
 		warn(`[Cutscene] Senjata ${from} gak ada di ServerStorage.Weapons, aktor pakai pedang part`);
 		return undefined;
 	}
+	// Clone Tool-nya utuh dulu baru dipindah isinya: kalau anaknya di-clone satu-satu, las (Weld) bilah masih nunjuk
+	// ke Handle asli di ServerStorage (gak ada di client), bilahnya lepas dan jatuh
+	const copy = tool.Clone();
 	const model = new Instance("Model");
 	model.Name = name;
-	for (const child of tool.GetChildren()) {
-		if (child.IsA("LuaSourceContainer") || child.IsA("RemoteEvent") || child.IsA("RemoteFunction") || child.IsA("BindableEvent")) continue;
-		child.Clone().Parent = model;
+	for (const child of copy.GetChildren()) {
+		if (child.IsA("LuaSourceContainer") || child.IsA("RemoteEvent") || child.IsA("RemoteFunction") || child.IsA("BindableEvent")) child.Destroy();
+		else child.Parent = model;
 	}
+	copy.Destroy();
 	for (const d of model.GetDescendants()) if (d.IsA("LuaSourceContainer")) d.Destroy();
 	const handle = model.FindFirstChild("Handle");
 	if (!handle || !handle.IsA("BasePart")) {

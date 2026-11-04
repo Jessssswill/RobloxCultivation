@@ -27,8 +27,9 @@ export const SFX: Record<string, string> = {
 	clash: "rbxassetid://9119072674", // denting pedang logam (Pro Sound Effects)
 	crack: "rbxassetid://9114858583", // retakan es besar (Pro Sound Effects)
 	shatter: "rbxassetid://132349765576039", // pecah kaca keras
-	// Angin menderu (loop 10 dtk). Id lama 112385924701681 "Cold Wind Howling" ternyata lagu DistroKid 4:51, bukan angin
-	wind: "rbxassetid://6544555787",
+	// Angin dimatiin (4 Nov): 112385924701681 "Cold Wind Howling" ternyata lagu DistroKid 4:51, penggantinya 6544555787
+	// kedengeran kayak hujan / radio kresek. Musiknya udah cukup ngisi, jadi gak pakai loop angin sama sekali.
+	wind: "",
 	whoosh: "rbxassetid://9126229255", // whoosh cepat (Pro Sound Effects)
 	thud: "rbxassetid://98059896877360", // hantaman jatuh
 	thunder: "rbxassetid://9126099928", // petir besar (Pro Sound Effects)
@@ -62,6 +63,8 @@ export const TEX = {
 	flare: "rbxassetid://74917717176224",
 	smokeFlip: "rbxassetid://128189018436398",
 	swirl: "rbxassetid://74831198929905",
+	// Petir bercabang memanjang (1024x256), buat retakan ruang/langit dan serat energi di sinar tebasan
+	lightning: "rbxassetid://123916754948707",
 	// spark belum di-upload, pakai bawaan Roblox
 	spark: "rbxasset://textures/particles/sparkles_main.dds",
 };
