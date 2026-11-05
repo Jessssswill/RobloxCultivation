@@ -1,0 +1,345 @@
+-- InkPainting/Cinema (ModuleScript) -> ReplicatedStorage.InkPainting.Cinema
+-- Caster-only part of the T ultimate: 8 camera shots, ink-storm skybox, grade (grey ink world -> red hell), screen
+-- overlays (rice paper, ink frame, ink flood), letterbox, title and a skip button. Everything is local and restored
+-- in Destroy. Player attribute UltCutscene = false skips it (same switch as the sword ultimates).
+local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
+local StarterGui = game:GetService("StarterGui")
+local CAS = game:GetService("ContextActionService")
+local Config = require(script.Parent:WaitForChild("Config"))
+
+local T, Tex = Config.T, Config.Tex
+local ease = Config.ease
+local UP = Vector3.yAxis
+local TITLE = Font.new("rbxasset://fonts/families/Fondamento.json")
+local BODY = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium)
+
+local Cinema = {}
+
+local function lin(a, b, x)
+	return math.clamp((x - a) / (b - a), 0, 1)
+end
+
+local function make(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in props do
+		o[k] = v
+	end
+	o.Parent = parent
+	return o
+end
+
+-- {t, saturation, contrast, brightness, tint}
+local PAPER_TINT = Color3.new(1, 0.965, 0.9)
+local RED_TINT = Color3.new(1, 0.3, 0.26)
+local GRADE = {
+	{ 0, 0, 0, 0, Color3.new(1, 1, 1) },
+	{ T.Rise, -0.45, 0.1, 0, Color3.new(1, 1, 1) },
+	{ T.Sky, -0.88, 0.22, 0, Color3.new(1, 0.985, 0.95) },
+	{ T.Painting - 0.01, -0.88, 0.22, 0, Color3.new(1, 0.985, 0.95) },
+	{ T.Painting, -1, 0.36, 0.03, PAPER_TINT },
+	{ T.Red - 0.01, -1, 0.36, 0.03, PAPER_TINT },
+	{ T.Red, -1, 0.42, -0.03, RED_TINT },
+	{ T.Restore, -1, 0.42, -0.03, RED_TINT },
+	{ T.End, 0, 0, 0, Color3.new(1, 1, 1) },
+}
+
+local function grade(t)
+	local n = #GRADE
+	if t >= GRADE[n][1] then return GRADE[n] end
+	for i = 1, n - 1 do
+		local a, b = GRADE[i], GRADE[i + 1]
+		if t < b[1] then
+			local u = (t - a[1]) / math.max(1e-4, b[1] - a[1])
+			if i == 1 or a[1] == T.Rise then u = ease(u) end
+			return { t, a[2] + (b[2] - a[2]) * u, a[3] + (b[3] - a[3]) * u, a[4] + (b[4] - a[4]) * u, a[5]:Lerp(b[5], u) }
+		end
+	end
+	return GRADE[n]
+end
+
+local SHAKES = {
+	{ T.Impact, 1.0, 9 },
+	{ Config.Hits[2].t, 0.35, 12 },
+	{ Config.Hits[3].t, 0.35, 12 },
+	{ T.Claws, 0.6, 10 },
+	{ T.Claws + 0.14, 0.45, 10 },
+	{ T.Dive, 0.4, 6 },
+	{ T.Final, 1.3, 7 },
+}
+
+function Cinema.New(ctx, fx)
+	local player = Players.LocalPlayer
+	local pg = player:WaitForChild("PlayerGui")
+	local camera = workspace.CurrentCamera
+	local origin, P = ctx.origin, ctx.P
+	local f = Vector3.new(origin.LookVector.X, 0, origin.LookVector.Z).Unit
+	local r = f:Cross(UP).Unit
+	local E = P + UP * 58 - f * 6
+	local char = ctx.char
+	local self = { connections = {}, hidden = {}, core = {}, transparency = {} }
+
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	local ignore = { char, fx.folder }
+	local monsters = workspace:FindFirstChild("Monsters")
+	if monsters then table.insert(ignore, monsters) end
+	rp.FilterDescendantsInstances = ignore
+	local g0 = workspace:Raycast(origin.Position + UP * 4, -UP * 40, rp)
+	local ground0 = g0 and g0.Position or origin.Position - UP * 3
+
+	-- save + take over
+	self.cam = { type = camera.CameraType, subject = camera.CameraSubject, fov = camera.FieldOfView, cframe = camera.CFrame, focus = camera.Focus }
+	camera.CameraType = Enum.CameraType.Scriptable
+	for _, g in pg:GetChildren() do
+		if g:IsA("ScreenGui") and g.Enabled and g.Name ~= "InkPaintingSky" then
+			self.hidden[g] = true
+			g.Enabled = false
+		end
+	end
+	for _, core in { Enum.CoreGuiType.Backpack, Enum.CoreGuiType.PlayerList, Enum.CoreGuiType.Chat, Enum.CoreGuiType.Health } do
+		local ok, on = pcall(function() return StarterGui:GetCoreGuiEnabled(core) end)
+		if ok then
+			self.core[core] = on
+			pcall(function() StarterGui:SetCoreGuiEnabled(core, false) end)
+		end
+	end
+	for _, p in char:GetDescendants() do
+		if p:IsA("BasePart") and p.LocalTransparencyModifier ~= 0 then
+			self.transparency[p] = p.LocalTransparencyModifier
+			p.LocalTransparencyModifier = 0
+		end
+	end
+	CAS:BindActionAtPriority("InkPaintingSink", function() return Enum.ContextActionResult.Sink end, false, 3000,
+		Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Space, Enum.KeyCode.Z, Enum.KeyCode.X)
+
+	local cc = make("ColorCorrectionEffect", { Name = "InkPaintingGrade" }, camera)
+	self.cc = cc
+
+	-- sky + atmosphere (swapped at the shot-2 cut)
+	local sky = Instance.new("Sky")
+	sky.Name = "InkPaintingSky"
+	sky.SkyboxBk, sky.SkyboxLf, sky.SkyboxFt, sky.SkyboxRt = Tex.skySide[1], Tex.skySide[2], Tex.skySide[3], Tex.skySide[4]
+	sky.SkyboxUp, sky.SkyboxDn = Tex.skyUp, Tex.skyUp
+	sky.CelestialBodiesShown = false
+	sky.StarCount = 0
+	self.sky = sky
+	self.oldSkies = {}
+	local atm = Lighting:FindFirstChildOfClass("Atmosphere")
+	if atm then
+		self.atm = atm
+		self.atmSaved = { Density = atm.Density, Offset = atm.Offset, Color = atm.Color, Decay = atm.Decay, Glare = atm.Glare, Haze = atm.Haze }
+	end
+
+	-- overlays
+	local gui = make("ScreenGui", { Name = "InkPaintingCinema", IgnoreGuiInset = true, ResetOnSpawn = false, DisplayOrder = 100, ZIndexBehavior = Enum.ZIndexBehavior.Sibling }, pg)
+	self.gui = gui
+	local paper = make("ImageLabel", { Name = "Paper", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Image = Tex.paper, ScaleType = Enum.ScaleType.Tile, TileSize = UDim2.fromOffset(512, 512), ImageTransparency = 1, ZIndex = 2 }, gui)
+	local vignette = make("ImageLabel", { Name = "InkFrame", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Image = Tex.vignette, ImageColor3 = Color3.new(0, 0, 0), ImageTransparency = 1, ZIndex = 3 }, gui)
+	local flood = make("ImageLabel", { Name = "InkFlood", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1, Image = Tex.bleed, ImageColor3 = Color3.new(0, 0, 0), ImageTransparency = 1, ZIndex = 5 }, gui)
+	local black = make("Frame", { Name = "Black", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 5 }, gui)
+	local redFlood = make("ImageLabel", { Name = "RedFlood", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1, Image = Tex.bleed, ImageColor3 = Color3.fromRGB(150, 8, 8), ImageTransparency = 1, ZIndex = 6 }, gui)
+	local flash = make("Frame", { Name = "Flash", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 7 }, gui)
+	local bars = {}
+	for _, top in { true, false } do
+		table.insert(bars, make("Frame", { AnchorPoint = Vector2.new(0, top and 1 or 0), Position = UDim2.fromScale(0, top and 0 or 1), Size = UDim2.fromScale(1, 0.075), BackgroundColor3 = Color3.fromRGB(8, 7, 9), BorderSizePixel = 0, ZIndex = 8 }, gui))
+	end
+	local title = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.962), Size = UDim2.fromScale(0.8, 0.045), BackgroundTransparency = 1, Text = Config.Title, FontFace = TITLE, TextScaled = true, TextColor3 = Color3.fromRGB(240, 232, 216), TextTransparency = 1, ZIndex = 9 }, gui)
+	make("UITextSizeConstraint", { MaxTextSize = 24 }, title)
+	local skip = make("TextButton", { Name = "Skip", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -18, 0.962, 0), Size = UDim2.fromOffset(112, 30), BackgroundColor3 = Color3.fromRGB(20, 18, 20), BackgroundTransparency = 0.35, Text = "LEWATI  ▸▸", FontFace = BODY, TextSize = 14, TextColor3 = Color3.fromRGB(230, 222, 210), AutoButtonColor = true, ZIndex = 10 }, gui)
+	make("UICorner", { CornerRadius = UDim.new(0, 6) }, skip)
+	make("UIStroke", { Color = Color3.fromRGB(150, 140, 130), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, skip)
+	skip.Activated:Connect(function()
+		self.skipped = true
+		self:Destroy()
+	end)
+	CAS:BindActionAtPriority("InkPaintingSkip", function(_, state)
+		if state == Enum.UserInputState.Begin then
+			self.skipped = true
+			task.defer(function() self:Destroy() end)
+		end
+		return Enum.ContextActionResult.Sink
+	end, false, 3001, Enum.KeyCode.ButtonB)
+
+	local function casterPos()
+		local root = char:FindFirstChild("HumanoidRootPart")
+		return root and root.Position or origin.Position
+	end
+	local function headPos()
+		local head = char:FindFirstChild("Head")
+		return head and head.Position or casterPos() + UP * 1.5
+	end
+	local function dragonFocus()
+		local d = fx.dragon
+		if d and d.DragonFocus then
+			local ok, cf = pcall(d.DragonFocus, d)
+			if ok and typeof(cf) == "CFrame" then return cf.Position end
+		end
+		return nil
+	end
+
+	local function shot(t)
+		if t < T.Rise then -- 1 close-up, brush before the face
+			local head = headPos()
+			local u = ease(t / T.Rise)
+			return (head + f * 5.6 + r * 1.2 - UP * 0.4):Lerp(head + f * 4.3 + r * 0.8 - UP * 0.3, u), head - UP * 0.5 + r * 0.2, 40 - 5 * u
+		elseif t < T.Tendrils then -- 2 low wide angle into the storm
+			local u = ease(lin(T.Rise, T.Tendrils, t))
+			return ground0 + UP * 1.6 - f * 13 + r * 11 + (r * 2 - f * 2) * u, casterPos() + UP * 1.5, 74 - 6 * u
+		elseif t < T.Stroke then -- 3 over the shoulder, down at the monsters
+			local u = ease(lin(T.Tendrils, T.Stroke, t))
+			return casterPos() - f * 8 + r * 4.5 + UP * (4.5 + u), P + UP * 1.5, 62 - 4 * u
+		elseif t < T.Painting then -- 4 frontal wide, the phantom brush slams, stroke across the frame
+			local u = ease(lin(T.Stroke, T.Painting, t))
+			return P + f * (44 - 3 * u) + UP * 7, P + UP * 13 - f * 6, 64 - 4 * u
+		elseif t < T.Wide then -- 5a low near the stroke, the dragon rises
+			local u = ease(lin(T.Painting, T.Wide, t))
+			return P + f * 16 + r * 12 + UP * (2 + 2 * u), dragonFocus() or (P + UP * 10), 56
+		elseif t < T.Black then -- 5b wide: vortex + caster, ink floods the screen
+			local u = ease(lin(T.Wide, T.Black, t))
+			return P + r * (56 - 8 * u) + UP * 14 - f * 10, P + UP * 20 - f * 8, 58 - 3 * u
+		elseif t < T.Demons then -- 7 up at the sky, the eye opens
+			local u = ease(lin(T.Black, T.Demons, t))
+			return P + f * 18 - r * 6 + UP * 1.8, E, 72 - 8 * u
+		elseif t < T.Final then -- 8a demons around the eye, then they dive
+			local u = ease(lin(T.Demons, T.Final, t))
+			return P + f * 26 - r * 4 + UP * 4, E:Lerp(P + UP * 4, ease(lin(T.Dive, T.Final, t))), 76 - 2 * u
+		elseif t < T.Restore then -- 8b the hit
+			local u = ease(lin(T.Final, T.Restore, t))
+			return P + f * 13 + r * 9 + UP * (3 + u), P + UP * 2, 68 + 4 * u
+		end
+		local c = casterPos()
+		return c - f * 13 + UP * 5, c, 70
+	end
+
+	local function shake(t)
+		local a = 0
+		for _, s in SHAKES do
+			local age = t - s[1]
+			if age >= 0 then a += s[2] * math.exp(-age * s[3]) end
+		end
+		return a
+	end
+
+	function self:Update(t)
+		if self.dead then return end
+		-- grade + sky
+		local g = grade(t)
+		local hit = math.exp(-math.max(0, t - T.Impact) * 14) * (t >= T.Impact and 1 or 0)
+		local fin = math.exp(-math.max(0, t - T.Final) * 10) * (t >= T.Final and 1 or 0)
+		cc.Saturation = g[2]
+		cc.Contrast = g[3] + 0.3 * hit + 0.3 * fin
+		cc.Brightness = g[4] + 0.35 * hit + 0.3 * fin
+		cc.TintColor = g[5]
+		if t >= T.Sky and t < T.Restore + 0.2 and not self.skyOn then
+			self.skyOn = true
+			for _, s in Lighting:GetChildren() do
+				if s:IsA("Sky") then
+					table.insert(self.oldSkies, s)
+					s.Parent = nil
+				end
+			end
+			sky.Parent = Lighting
+			if self.atm then
+				self.atm.Density, self.atm.Offset, self.atm.Glare, self.atm.Haze = 0.42, 0.15, 0, 1.5
+				self.atm.Color, self.atm.Decay = Color3.fromRGB(205, 203, 198), Color3.fromRGB(120, 118, 115)
+			end
+		elseif t >= T.Restore + 0.2 and self.skyOn then
+			self.skyOn = false
+			self:RestoreSky()
+		end
+
+		-- overlays
+		local inkWorld = lin(T.Sky, T.Sky + 0.25, t) * (1 - lin(T.Restore, T.End - 0.2, t))
+		vignette.ImageTransparency = 1 - 0.85 * inkWorld
+		vignette.ImageColor3 = t > T.Red and Color3.fromRGB(40, 0, 0) or Color3.new(0, 0, 0)
+		local paperA = t >= T.Painting and (t < T.Red and 0.75 or 0.45) * (1 - lin(T.Restore, T.End - 0.2, t)) or 0
+		paper.ImageTransparency = 1 - paperA
+		local vp = camera.ViewportSize
+		local big = math.max(vp.X, vp.Y) * 3
+		local fl = lin(T.Flood, T.Black, t)
+		flood.ImageTransparency = (fl > 0 and t < T.Red + 0.05) and 0 or 1
+		local fs = big * fl ^ 1.6
+		flood.Size = UDim2.fromOffset(fs, fs)
+		black.BackgroundTransparency = 1 - math.min(lin(T.Black - 0.04, T.Black, t), 1 - lin(T.Red + 0.02, T.Eye - 0.02, t))
+		local rf = lin(T.Red - 0.04, T.Red + 0.16, t)
+		local rs = big * rf ^ 1.4
+		redFlood.Size = UDim2.fromOffset(rs, rs)
+		redFlood.ImageTransparency = (rf > 0) and lin(T.Red + 0.1, T.Eye + 0.25, t) or 1
+		local fh = math.max(math.exp(-math.max(0, t - T.Impact) * 22) * (t >= T.Impact and 1 or 0), math.exp(-math.max(0, t - T.Final) * 16) * (t >= T.Final and 1 or 0))
+		flash.BackgroundTransparency = 1 - 0.75 * fh
+		flash.BackgroundColor3 = t >= T.Final and Color3.fromRGB(255, 220, 205) or Color3.new(1, 1, 1)
+		local barsIn = ease(lin(0, 0.3, t)) * (1 - ease(lin(T.Restore + 0.15, T.End, t)))
+		bars[1].Position = UDim2.fromScale(0, 0.075 * barsIn)
+		bars[2].Position = UDim2.fromScale(0, 1 - 0.075 * barsIn)
+		title.TextTransparency = 1 - math.min(lin(T.Sky + 0.05, T.Sky + 0.35, t), 1 - lin(T.Stroke - 0.2, T.Stroke, t))
+		skip.Visible = t < T.Restore
+
+		-- camera
+		local pos, look, fov = shot(t)
+		local leave = ease(lin(T.Restore, T.End, t))
+		local hitR = workspace:Raycast(look, pos - look, rp)
+		if hitR and hitR.Instance.CanCollide and hitR.Distance > 2 then
+			pos = hitR.Position + hitR.Normal * 0.7
+		end
+		local a = shake(t)
+		local cf = CFrame.lookAt(pos, look)
+		cf = cf * CFrame.new(math.sin(t * 97) * 0.35 * a, math.sin(t * 131) * 0.22 * a, 0) * CFrame.Angles(0, 0, math.rad(0.8) * math.sin(t * 89) * a)
+		if leave > 0 then
+			local root = char:FindFirstChild("HumanoidRootPart")
+			local delta = root and (root.Position - origin.Position) or Vector3.zero
+			cf = cf:Lerp(self.cam.cframe + delta, leave)
+			fov = fov + (self.cam.fov - fov) * leave
+		end
+		camera.CFrame = cf
+		camera.Focus = CFrame.new(look)
+		camera.FieldOfView = fov
+	end
+
+	function self:RestoreSky()
+		sky.Parent = nil
+		for _, s in self.oldSkies do
+			if s then s.Parent = Lighting end
+		end
+		self.oldSkies = {}
+		if self.atm and self.atm.Parent then
+			for k, v in self.atmSaved do
+				self.atm[k] = v
+			end
+		end
+	end
+
+	function self:Destroy()
+		if self.dead then return end
+		self.dead = true
+		CAS:UnbindAction("InkPaintingSink")
+		CAS:UnbindAction("InkPaintingSkip")
+		self:RestoreSky()
+		sky:Destroy()
+		cc:Destroy()
+		gui:Destroy()
+		for g in self.hidden do
+			if g.Parent then g.Enabled = true end
+		end
+		for core, on in self.core do
+			pcall(function() StarterGui:SetCoreGuiEnabled(core, on) end)
+		end
+		for p, m in self.transparency do
+			if p.Parent then p.LocalTransparencyModifier = m end
+		end
+		local root = char:FindFirstChild("HumanoidRootPart")
+		local delta = root and (root.Position - origin.Position) or Vector3.zero
+		if camera and camera.Parent then
+			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			camera.CameraSubject = (self.cam.subject and self.cam.subject.Parent) and self.cam.subject or hum
+			camera.FieldOfView = self.cam.fov
+			camera.CFrame = self.cam.cframe + delta
+			camera.Focus = self.cam.focus + delta
+			camera.CameraType = self.cam.type
+		end
+	end
+
+	return self
+end
+
+return Cinema

@@ -38,6 +38,9 @@
 			"SwordComboClient": {
 				"$path": "luau/ReplicatedStorage/SwordComboClient.lua",
 				"$ignoreUnknownInstances": true
+			},
+			"InkPainting": {
+				"$path": "luau/ReplicatedStorage/InkPainting"
 			}
 		},
 		"ServerScriptService": {
@@ -120,6 +123,10 @@
 			},
 			"SwordComboRelay": {
 				"$path": "luau/ServerScriptService/SwordComboRelay.server.lua",
+				"$ignoreUnknownInstances": true
+			},
+			"InkPaintingServer": {
+				"$path": "luau/ServerScriptService/InkPaintingServer.server.lua",
 				"$ignoreUnknownInstances": true
 			}
 		},
@@ -205,6 +212,10 @@
 				},
 				"SwordComboRemote": {
 					"$path": "luau/StarterPlayerScripts/SwordComboRemote.client.lua",
+					"$ignoreUnknownInstances": true
+				},
+				"InkPaintingClient": {
+					"$path": "luau/StarterPlayerScripts/InkPaintingClient.client.lua",
 					"$ignoreUnknownInstances": true
 				}
 			}
