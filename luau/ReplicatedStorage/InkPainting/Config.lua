@@ -49,20 +49,22 @@ Config.T = {
 	End = 7.5,
 }
 
--- Textures. Self-made (assets/InkBrush/vfx/make_ink_textures_v1.py). Until will OKs the upload they load from the
+-- Textures. Self-made (assets/InkBrush/vfx/make_ink_textures_v1.py + _v2.py). Until will OKs the upload they load from the
 -- Studio content folder on his laptop (content/textures/QiInk), so they ONLY show in his Studio. After the upload,
 -- swap these to rbxassetid:// ids.
 local LOCAL = "rbxasset://textures/QiInk/"
 Config.Tex = {
-	stroke = LOCAL .. "ink_stroke.png",
+	stroke = LOCAL .. "ink_stroke.png", -- beams
+	strokeGround = LOCAL .. "ink_stroke_ground.png", -- v2: the giant stroke card on the ground (margin, no straight edges)
 	splat = LOCAL .. "ink_splat_flip.png", -- 2x2
 	tendril = LOCAL .. "ink_tendril.png",
 	bleed = LOCAL .. "ink_bleed.png",
+	bleedWhite = LOCAL .. "ink_bleed_white.png", -- v2: white pigment, for tinted floods (black ink times red stays black)
 	cloud = LOCAL .. "ink_cloud_flip.png", -- 2x2
 	paper = LOCAL .. "ink_paper.png",
 	vignette = LOCAL .. "ink_vignette.png",
 	eye = LOCAL .. "hell_eye_flip.png", -- 2x2, closed -> open, pre-coloured
-	claw = LOCAL .. "claw_slash.png",
+	claw = LOCAL .. "claw_slash_v2.png", -- v2: the v1 tears ran off the texture border (straight cut ends in shot 7)
 	demon = LOCAL .. "demon_face_flip.png", -- 2x2
 	skySide = { LOCAL .. "ink_sky_side0.png", LOCAL .. "ink_sky_side1.png", LOCAL .. "ink_sky_side2.png", LOCAL .. "ink_sky_side3.png" },
 	skyUp = LOCAL .. "ink_sky_up.png",
@@ -113,7 +115,7 @@ end
 -- Held brush: calligraphy size in the shot-1 close-up, grows 3x on the launch, back to the real size at the end
 -- (the colossal phantom brush is separate, see FX).
 function Config.BrushScale(t)
-	local small = 1 - 0.78 * ease(t / 0.25) -- shot 1: hand-sized, the tip ends by the mouth (ref 0:03.5)
+	local small = 1 - 0.78 * ease(t / 0.08) -- shot 1: hand-sized, held up before the face (hidden by the cut in)
 	local grow = math.clamp((t - 0.95) / 0.45, 0, 1)
 	grow = 1 + 2.70158 * (grow - 1) ^ 3 + 1.70158 * (grow - 1) ^ 2 -- ease out back
 	local big = small + (1.6 - small) * grow

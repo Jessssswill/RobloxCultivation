@@ -84,15 +84,23 @@ local function groundRay(pos, ignore)
 	return hit and hit.Position or pos
 end
 
--- Terrain grass (decoration on) is about a stud tall and swallows flat ground decals: lift the cards over it there.
-local function cardLift(pos, ignore)
+-- Ground cards are flat, the forest floor is not, and terrain grass (decoration on) swallows flat decals. Lift a card
+-- over the highest ground under it plus the grass. (Scripts cannot switch Terrain.Decoration off: plugin-only.)
+local function cardLift(pos, ignore, r, f, spread)
 	local rp = RaycastParams.new()
 	rp.FilterType = Enum.RaycastFilterType.Exclude
 	rp.FilterDescendantsInstances = ignore
-	local hit = workspace:Raycast(pos + UP * 3, -UP * 8, rp)
-	local grassy = hit and hit.Instance:IsA("Terrain") and (hit.Material == Enum.Material.Grass or hit.Material == Enum.Material.LeafyGrass)
 	local ok, decorated = pcall(function() return workspace.Terrain.Decoration end)
-	return (grassy and (not ok or decorated)) and 0.9 or 0
+	local rise, grassy = 0, false
+	for _, off in { Vector3.zero, r * spread, -r * spread, f * spread, -f * spread } do
+		local hit = workspace:Raycast(pos + off + UP * 6, -UP * 14, rp)
+		if hit then
+			rise = math.max(rise, hit.Position.Y - pos.Y)
+			if hit.Instance:IsA("Terrain") and (hit.Material == Enum.Material.Grass or hit.Material == Enum.Material.LeafyGrass) then grassy = true end
+		end
+	end
+	local grass = (grassy and (not ok or decorated)) and 2.1 or 0 -- the forest grass stands ~2.2 studs tall
+	return math.min(math.min(rise, 1.5) + grass, 3.2)
 end
 
 -- flat decal on the ground that can grow / fade
@@ -237,7 +245,7 @@ function FX.New(ctx)
 	local ground0 = groundRay(origin.Position, ignore)
 	local groundIgnore = { ctx.char, folder }
 	if workspace:FindFirstChild("Monsters") then table.insert(groundIgnore, workspace.Monsters) end
-	local lift0, liftP = cardLift(ground0, groundIgnore), cardLift(P, groundIgnore)
+	local lift0, liftP = cardLift(ground0, groundIgnore, r, f, 8), cardLift(P, groundIgnore, r, f, 14)
 	local A, B = P - r * 28, P + r * 28
 	local E = P + UP * 58 - f * 6
 
@@ -269,9 +277,13 @@ function FX.New(ctx)
 	light.Parent = tipPart
 	local tipGlow = emitter(tipAtt, {
 		Texture = Tex.glow, Color = ColorSequence.new(Color3.fromRGB(255, 80, 150)), LightEmission = 1,
-		Size = seq({ { 0, 0.6 }, { 0.3, 1.4 }, { 1, 0 } }), Transparency = seq({ { 0, 0.3 }, { 1, 1 } }),
+		Size = seq({ { 0, 0.25 }, { 0.3, 0.6 }, { 1, 0 } }), Transparency = seq({ { 0, 0.5 }, { 1, 1 } }),
 		Lifetime = NumberRange.new(0.25, 0.45), Speed = NumberRange.new(0.3, 1.2), SpreadAngle = Vector2.new(180, 180),
 	})
+	-- shot 1 holds the brush a stud from the face: small glow there, the full one from the launch on
+	local GLOW_SMALL, GLOW_SMALL_T = tipGlow.Size, tipGlow.Transparency
+	local GLOW_BIG, GLOW_BIG_T = seq({ { 0, 0.6 }, { 0.3, 1.4 }, { 1, 0 } }), seq({ { 0, 0.3 }, { 1, 1 } })
+	local glowBig = false
 	local drips = emitter(tipAtt, {
 		Texture = Tex.splat, Color = ColorSequence.new(BLACK), Size = seq({ { 0, 0.5 }, { 0.2, 1.1 }, { 1, 0.3 } }),
 		Transparency = seq({ { 0, 0.05 }, { 0.8, 0.2 }, { 1, 1 } }), Lifetime = NumberRange.new(0.6, 1.0),
@@ -371,13 +383,16 @@ function FX.New(ctx)
 		end
 	end
 
-	-- 5-6. giant stroke on the ground, revealed left to right while the phantom brush drags across
-	local strokePart = part(folder, "GiantStroke", Vector3.new(56, 0.05, 18), CFrame.fromMatrix(P + UP * (liftP + 0.12), r, UP))
+	-- 5-6. giant stroke on the ground, revealed left to right under the phantom brush as it drags across
+	-- A Top-face SurfaceGui runs canvas X along the part's -Z and canvas Y along its +X. So the part's X axis is -f
+	-- (stroke width, towards the shot-4 camera) and its -Z is r: canvas left = A, the brush press; reveal A -> B.
+	local STROKE_W, STROKE_D = 64, 40
+	local strokePart = part(folder, "GiantStroke", Vector3.new(STROKE_D, 0.05, STROKE_W), CFrame.fromMatrix(P + UP * (liftP + 0.12), -f, UP))
 	local function strokeGui(color, glow)
 		local sg = Instance.new("SurfaceGui")
 		sg.Face = Enum.NormalId.Top
 		sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
-		sg.CanvasSize = Vector2.new(1024, 329)
+		sg.CanvasSize = Vector2.new(1024, 512)
 		sg.LightInfluence = glow and 0 or 1
 		sg.Brightness = glow and 2.5 or 1
 		sg.AlwaysOnTop = false
@@ -390,9 +405,9 @@ function FX.New(ctx)
 		clip.Parent = sg
 		local img = Instance.new("ImageLabel")
 		img.BackgroundTransparency = 1
-		img.Image = Tex.stroke
+		img.Image = Tex.strokeGround or Tex.stroke
 		img.ImageColor3 = color
-		img.Size = UDim2.fromOffset(1024, 329)
+		img.Size = UDim2.fromOffset(1024, 512)
 		img.ImageTransparency = glow and 1 or 0.02
 		img.Parent = clip
 		return clip, img
@@ -553,8 +568,13 @@ function FX.New(ctx)
 
 		-- brush tip
 		tipPart.CFrame = CFrame.new(info.tip)
-		light.Brightness = 3 * window(t, 0.1, 0.3, 7.3, 0.4) * (t < T.Rise and 1 or 0.55)
+		light.Brightness = 3 * window(t, 0.1, 0.3, 7.3, 0.4) * (t < T.Rise and 0.4 or 0.55) -- shot 1: a stud from the face
 		tipGlow.Rate = t < T.Rise + 0.1 and 30 or (t < T.Restore and 6 or 0)
+		if glowBig ~= (t >= T.Rise) then
+			glowBig = t >= T.Rise
+			tipGlow.Size = glowBig and GLOW_BIG or GLOW_SMALL
+			tipGlow.Transparency = glowBig and GLOW_BIG_T or GLOW_SMALL_T
+		end
 		drips.Rate = (t > T.Rise and t < T.Stroke) and 18 * k or 0
 
 		-- launch bloom
@@ -575,9 +595,9 @@ function FX.New(ctx)
 		for _, v in fx.victims do
 			local alive = v.m.Parent and v.root.Parent
 			local bind = alive and window(t, Config.BindFrom, 0.25, Config.BindUntil + 0.1, 0.3) or 0
-			v.hl.FillTransparency = 1 - 0.55 * bind
+			v.hl.FillTransparency = 1 - 0.85 * bind -- solid ink: at 0.45 the light monster skin showed through as pink
 			v.hl.OutlineTransparency = 1 - 0.8 * bind
-			v.hl.FillColor = t > T.Red and DARK_RED or BLACK
+			v.hl.OutlineColor = t > T.Red and HELL or BLACK
 			local climb = outCubic(lin(Config.BindFrom, Config.BindFrom + 0.45, t))
 			for _, b in v.beams do
 				b.top.CFrame = CFrame.new(v.feet + UP * (0.2 + b.height * climb))
@@ -585,27 +605,32 @@ function FX.New(ctx)
 			end
 		end
 
-		-- phantom brush slam + drag
+		-- phantom brush slam + drag (the tip rides on the stroke card, which sits over the grass)
+		local wipe = t < T.Slam and 0 or 1
+		fx.phantomTip, fx.phantomMid = nil, nil
 		if t >= T.Stroke and t <= T.Painting + 0.2 then
 			local tip, dir, alpha
 			local down = -UP
+			local ink = UP * (liftP + 0.35)
 			if t < T.Slam then
 				local u = ease(lin(T.Stroke + 0.06, T.Slam, t))
-				tip = (A + UP * 42 - r * 6):Lerp(A + UP * 0.4, u * u)
+				tip = (A + UP * 42 - r * 6):Lerp(A + ink, u * u)
 				dir = (down + r * 0.32 + f * 0.18).Unit
 				alpha = lin(T.Stroke + 0.06, T.Stroke + 0.16, t)
 			elseif t < 3.06 then
 				local u = ease(lin(T.Slam, 3.06, t))
-				tip = (A + UP * 0.4):Lerp(B + UP * 0.4, u)
+				tip = (A + ink):Lerp(B + ink, u)
 				dir = ((down + r * 0.32 + f * 0.18):Lerp(down - r * 0.28 + f * 0.18, u)).Unit
 				alpha = 1
+				wipe = math.clamp(((tip - P):Dot(r) + STROKE_W * 0.5 + 5) / STROKE_W, 0, 1) -- the bristles lead by a few studs
 			else
 				local u = ease(lin(3.06, T.Painting + 0.15, t))
-				tip = (B + UP * 0.4):Lerp(B + UP * 34 + r * 10, u)
+				tip = (B + ink):Lerp(B + UP * 34 + r * 10, u)
 				dir = (down - r * 0.28 + f * 0.18).Unit
 				alpha = 1 - u
 			end
 			phantom:Place(tip, dir, f, 1 - alpha)
+			if alpha > 0.05 then fx.phantomTip, fx.phantomMid = tip, tip - dir * 22 end -- Cinema fades trees in front of it
 			phantomInk.FillTransparency = 1 - 0.9 * alpha
 			phantomInk.OutlineTransparency = 1 - 0.8 * alpha
 			dragPart.CFrame = CFrame.new(tip)
@@ -617,7 +642,6 @@ function FX.New(ctx)
 				phantom:Destroy()
 			end
 		end
-		local wipe = lin(T.Slam, 3.06, t)
 		strokeClip.Size = UDim2.fromScale(wipe, 1)
 		strokeImg.ImageTransparency = 0.02 + 0.98 * lin(T.Restore, T.End - 0.1, t)
 		strokeImg.ImageColor3 = t > T.Red and DARK_RED or BLACK

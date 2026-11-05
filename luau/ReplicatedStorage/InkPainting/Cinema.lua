@@ -216,7 +216,7 @@ function Cinema.New(ctx, fx)
 				local half = p.Size * 0.35
 				table.insert(ghosts, {
 					part = p, cf = p.CFrame, center = p.Position, size = p.Size, half = half, radius = half.Magnitude,
-					lens = p.Size.Magnitude < 100, reach = p.Size.Magnitude * 0.5 + 4.5,
+					lens = p.Size.Magnitude < 125, reach = p.Size.Magnitude * 0.5 + 4.5,
 				})
 			end
 			if e.sa and e.sa.Parent == p and d < 260 then table.insert(leaves, e.sa) end
@@ -246,7 +246,7 @@ function Cinema.New(ctx, fx)
 	local vignette = make("ImageLabel", { Name = "InkFrame", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Image = Tex.vignette, ImageColor3 = Color3.new(0, 0, 0), ImageTransparency = 1, ZIndex = 3 }, gui)
 	local flood = make("ImageLabel", { Name = "InkFlood", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1, Image = Tex.bleed, ImageColor3 = Color3.new(0, 0, 0), ImageTransparency = 1, ZIndex = 5 }, gui)
 	local black = make("Frame", { Name = "Black", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 5 }, gui)
-	local redFlood = make("ImageLabel", { Name = "RedFlood", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1, Image = Tex.bleed, ImageColor3 = Color3.fromRGB(150, 8, 8), ImageTransparency = 1, ZIndex = 6 }, gui)
+	local redFlood = make("ImageLabel", { Name = "RedFlood", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1, Image = Tex.bleedWhite or Tex.bleed, ImageColor3 = Color3.fromRGB(205, 18, 14), ImageTransparency = 1, ZIndex = 6 }, gui)
 	local flash = make("Frame", { Name = "Flash", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 7 }, gui)
 	local bars = {}
 	for _, top in { true, false } do
@@ -294,30 +294,39 @@ function Cinema.New(ctx, fx)
 		elseif t < T.Tendrils then -- 2 low wide angle into the storm
 			local u = ease(lin(T.Rise, T.Tendrils, t))
 			return ground0 + UP * 4 - f * 14 + r * 11 + (r * 2 - f * 2) * u, casterPos() + UP * 1.5, 74 - 6 * u
-		elseif t < T.Stroke then -- 3 over the shoulder, down at the monsters
+		elseif t < T.Stroke then -- 3 the painter over his canvas: high behind the right shoulder, caster on the left third,
+			-- the bound monsters in the middle (the old framing put the head under the letterbox bar)
 			local u = ease(lin(T.Tendrils, T.Stroke, t))
-			return casterPos() - f * 8 + r * 4.5 + UP * (4.5 + u), P + UP * 1.5, 62 - 4 * u
+			local c = casterPos()
+			return c - f * (2.6 - 0.6 * u) + r * 4 + UP * (6.5 - 0.5 * u), P + UP * 1.5 + r * 2 + (c - P) * 0.2, 64
 		elseif t < T.Painting then -- 4 high frontal wide: the phantom brush drops in from the top, stroke across the frame
 			local u = ease(lin(T.Stroke, T.Painting, t))
 			return P + f * (34 - 3 * u) + UP * (24 - 2 * u), P + UP * 3 - f * 4, 70 - 4 * u
 		elseif t < T.Wide then -- 5a low near the stroke, the dragon rises
 			local u = ease(lin(T.Painting, T.Wide, t))
 			return P + f * 16 + r * 12 + UP * (5 + 2 * u), dragonFocus() or (P + UP * 10), 58
-		elseif t < T.Black then -- 5b wide: vortex + caster, ink floods the screen
+		elseif t < T.Black then -- 5b low under the canopy, up at the caster against the vortex + dragon, ink floods in
+			-- (at the caster's height the lens sat inside the tree crowns)
 			local u = ease(lin(T.Wide, T.Black, t))
-			return P + r * (56 - 8 * u) + UP * 14 - f * 10, P + UP * 20 - f * 8, 58 - 3 * u
+			return ground0 + UP * (3.6 + u) - f * 9 - r * 12, P + UP * 13 + r * 2, 64 - 3 * u
 		elseif t < T.Demons then -- 7 up at the sky, the eye opens
 			local u = ease(lin(T.Black, T.Demons, t))
-			return P + f * 18 - r * 6 + UP * 1.8, E, 72 - 8 * u
+			return P + f * (30 - 2 * u) - r * 3 + UP * 2.5, E, 72 - 8 * u
 		elseif t < T.Final then -- 8a demons around the eye, then they dive
 			local u = ease(lin(T.Demons, T.Final, t))
 			return P + f * 26 - r * 4 + UP * 4, E:Lerp(P + UP * 4, ease(lin(T.Dive, T.Final, t))), 76 - 2 * u
-		elseif t < T.Restore then -- 8b the hit
+		elseif t < T.Restore then -- 8b the hit, high and frontal so the whole painted stroke reads over the grass; pulls back
 			local u = ease(lin(T.Final, T.Restore, t))
-			return P + f * 13 + r * 9 + UP * (3 + u), P + UP * 2, 68 + 4 * u
+			return P + f * (22 + 3 * u) - r * (3 + u) + UP * (15 + 2.5 * u), P + UP - f * 2, 66 + 4 * u
 		end
 		local c = casterPos()
 		return c - f * 13 + UP * 5, c, 70
+	end
+
+	local function clearTerrain(pos, minUp)
+		local down = workspace:Raycast(pos + UP * 6, -UP * 12, terrainOnly)
+		if down and pos.Y < down.Position.Y + minUp then return Vector3.new(pos.X, down.Position.Y + minUp, pos.Z) end
+		return pos
 	end
 
 	local function shake(t)
@@ -406,9 +415,10 @@ function Cinema.New(ctx, fx)
 		-- camera
 		local pos, look, fov = shot(t)
 		local leave = ease(lin(T.Restore, T.End, t))
-		-- terrain pushes the camera in; everything else in the way gets faded below instead
+		-- keep the lens over the terrain grass, terrain pushes the camera in, everything else in the way gets faded below
+		pos = clearTerrain(pos, 3.6)
 		local hitR = workspace:Raycast(look, pos - look, terrainOnly)
-		if hitR and hitR.Distance > 2 then pos = hitR.Position + hitR.Normal * 0.7 end
+		if hitR and hitR.Distance > 2 then pos = clearTerrain(hitR.Position + hitR.Normal * 0.7, 2.4) end
 		local a = shake(t)
 		local cf = CFrame.lookAt(pos, look)
 		cf = cf * CFrame.new(math.sin(t * 97) * 0.35 * a, math.sin(t * 131) * 0.22 * a, 0) * CFrame.Angles(0, 0, math.rad(0.8) * math.sin(t * 89) * a)
@@ -426,7 +436,11 @@ function Cinema.New(ctx, fx)
 		local c = casterPos()
 		local seen = {}
 		local targets = { look }
-		if t < T.Painting or t >= T.Restore then table.insert(targets, c + UP * 1.5) end
+		if t < T.Painting or (t >= T.Wide and t < T.Black) or t >= T.Restore then table.insert(targets, c + UP * 1.5) end
+		if fx.phantomTip then
+			table.insert(targets, fx.phantomTip)
+			table.insert(targets, fx.phantomMid)
+		end
 		local okParts, parts = pcall(camera.GetPartsObscuringTarget, camera, targets, ignore)
 		if okParts then
 			for _, p in parts do
@@ -434,13 +448,13 @@ function Cinema.New(ctx, fx)
 					seen[p] = true
 					if self.faded[p] == nil then
 						self.faded[p] = p.LocalTransparencyModifier
-						p.LocalTransparencyModifier = 0.85
+						p.LocalTransparencyModifier = 0.94 -- 0.85 left grey ghost planes of the leaf cards
 					end
 				end
 			end
 		end
 		-- grass, branches and monsters right at the lens disappear completely
-		for _, p in workspace:GetPartBoundsInRadius(cf.Position, 7, overlap) do
+		for _, p in workspace:GetPartBoundsInRadius(cf.Position, 8.5, overlap) do
 			if not p:IsA("Terrain") and p.Size.Magnitude < 150 then
 				seen[p] = true
 				if self.faded[p] == nil then self.faded[p] = p.LocalTransparencyModifier end
@@ -449,6 +463,7 @@ function Cinema.New(ctx, fx)
 		end
 		-- the same for scenery the queries cannot see (CanQuery off): box tests against the cached boxes
 		local cp = cf.Position
+		local upward = cf.LookVector.Y > 0.4 -- shots 7 + 8a look up at the eye: crowns overhead would fill the frame
 		local segs = {}
 		for _, target in targets do
 			local span = target - cp
@@ -463,12 +478,17 @@ function Cinema.New(ctx, fx)
 					local s = g.size
 					if math.abs(l.X) < s.X * 0.5 + 2.5 and math.abs(l.Y) < s.Y * 0.5 + 2.5 and math.abs(l.Z) < s.Z * 0.5 + 2.5 then mode = 1 end
 				end
+				if mode == 0 and upward and g.lens then
+					local l = g.cf:PointToObjectSpace(cp)
+					local s = g.size
+					if math.abs(l.X) < s.X * 0.5 + 4 and math.abs(l.Z) < s.Z * 0.5 + 4 and l.Y < s.Y * 0.5 then mode = 1 end
+				end
 				if mode == 0 then
 					for _, b in segs do
 						local ab = b - cp
 						local u = math.clamp((g.center - cp):Dot(ab) / ab:Dot(ab), 0, 1)
 						if (cp + ab * u - g.center).Magnitude < g.radius and segmentHitsBox(g.cf, g.half, cp, b) then
-							mode = 0.85
+							mode = 0.94
 							break
 						end
 					end

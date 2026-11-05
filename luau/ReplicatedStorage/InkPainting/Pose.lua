@@ -19,12 +19,13 @@ local REST = {
 	LeftElbow = K(0, 22),
 }
 
--- Keyframes per shot. Shot 1 hand above the head, brush hanging tip-down in front of the face (ref 0:03.5),
--- 2 launch into the storm, 3 load overhead, 4 giant stroke, 5 conduct the painting, 6-7 brush to the sky for the eye,
--- 8 command the demons, land.
+-- Keyframes per shot. Shot 1 hand under the chin, brush held upright in front of the right cheek with the tip glowing
+-- at eye level (a hanging brush vanished in big hair), 2 launch into the storm, 3 load overhead, 4 giant stroke,
+-- 5 conduct the painting, 6-7 brush to the sky for the eye, 8 command the demons, land.
+-- Elbow/knee values are curls (forward for elbows, back for knees); measured in Studio 2026-11-05.
 local KEYS = {
 	RightShoulder = {
-		REST.RightShoulder, K(0.35, 140, 27, 0), K(0.85, 144, 29, 0),
+		REST.RightShoulder, K(0.35, 35, 5, 0), K(0.85, 37, 7, 0),
 		K(1.0, -25, -10, 45), K(1.45, -18, -30, 72), K(1.85, -10, -32, 70),
 		K(2.2, 150, 0, 22), K(2.58, 168, 0, 18),
 		K(2.78, 110, 20, 10), K(2.96, 35, 38, 6), K(3.2, 45, 30, 10),
@@ -33,7 +34,7 @@ local KEYS = {
 		K(6.36, 168, -5, 20), K(6.5, 40, 32, 6), K(6.9, 50, 25, 10), K(7.3, 30, 10, 14), K(7.5, 16, 0, 12),
 	},
 	RightElbow = {
-		REST.RightElbow, K(0.35, 14), K(0.85, 16),
+		REST.RightElbow, K(0.35, 60), K(0.85, 62),
 		K(1.0, 25), K(1.45, 10), K(1.85, 12),
 		K(2.2, 18), K(2.58, 14),
 		K(2.78, 8), K(2.96, 16), K(3.2, 20),
@@ -119,7 +120,7 @@ local KEYS = {
 
 -- Brush direction in root space (x right, y up, -z forward). Brush tip points along it.
 local BRUSH = {
-	{ 0, 0.2, -0.4, -1 }, { 0.35, 0, -1, -0.06 }, { 0.85, 0, -1, -0.06 },
+	{ 0, 0, 1, -0.12 }, { 0.35, 0, 1, -0.12 }, { 0.85, 0, 1, -0.12 },
 	{ 1.0, 0.7, -0.3, 0.6 }, { 1.45, 0.88, -0.22, 0.42 }, { 1.85, 0.86, -0.2, 0.45 },
 	{ 2.2, 0.1, 0.65, 0.75 }, { 2.58, 0.1, 0.55, 0.85 },
 	{ 2.78, 0, 0.25, -1 }, { 2.96, -0.4, -0.75, -0.55 }, { 3.2, -0.3, -0.6, -0.7 },
@@ -127,6 +128,8 @@ local BRUSH = {
 	{ 4.8, 0, 1, -0.08 }, { 6.15, 0, 1, -0.05 },
 	{ 6.36, 0.1, 0.6, 0.8 }, { 6.5, -0.35, -0.75, -0.6 }, { 6.9, -0.2, -0.6, -0.8 }, { 7.5, 0.2, -0.4, -1 },
 }
+
+Pose.KEYS, Pose.BRUSH = KEYS, BRUSH -- read-only for the game; Studio tests tune them live
 
 -- Grip in the right hand (same numbers InkDanceMotion used).
 local GRIP_C0 = CFrame.new(0, -0.10804, 0) * CFrame.Angles(0, math.pi, 0)
@@ -181,17 +184,19 @@ function Pose.Bind(char, tool)
 			self.joints[d.Name] = d
 		end
 	end
-	local look = root.CFrame.LookVector
+	-- bend sign per rig, read from the rest pose (R15 limbs are axis-aligned with the root at rest), so elbows fold
+	-- forward and knees back. The live pose must not be used: the brush-hold animation raises the arm, which flipped
+	-- the sign and bent the elbows backwards.
 	for _, n in { "RightElbow", "LeftElbow", "RightKnee", "LeftKnee" } do
 		local j = self.joints[n]
 		if j then
-			local frame, c1
+			local c0, c1
 			if j:IsA("Motor6D") then
-				frame, c1 = j.Part0.CFrame * j.C0, j.C1
+				c0, c1 = j.C0, j.C1
 			else
-				frame, c1 = j.Attachment0.WorldCFrame, j.Attachment1.CFrame
+				c0, c1 = j.Attachment0.CFrame, j.Attachment1.CFrame
 			end
-			local want = frame:VectorToObjectSpace(n:find("Knee") and -look or look)
+			local want = c0:VectorToObjectSpace(n:find("Knee") and Vector3.new(0, 0, 1) or Vector3.new(0, 0, -1))
 			local offset = c1:Inverse().Position
 			local moved = CFrame.Angles(0.3, 0, 0) * offset - offset
 			self.bend[n] = moved:Dot(want) >= 0 and 1 or -1
