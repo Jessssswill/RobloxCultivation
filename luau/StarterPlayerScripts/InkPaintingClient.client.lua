@@ -155,14 +155,36 @@ remote.OnClientEvent:Connect(function(action, ...)
 	end
 end)
 
-CAS:BindAction("InkPaintingUltimate", function(_, state)
-	if state == Enum.UserInputState.Begin then cast() end
-	return tool() and Enum.ContextActionResult.Sink or Enum.ContextActionResult.Pass
-end, true, Config.Key)
-CAS:SetTitle("InkPaintingUltimate", "T · " .. Config.Short)
+-- T is bound only while the brush is out, so T keeps working for the steed / sword riding / demon form otherwise
+-- (a CAS binding marks the key as game-processed for every UserInputService listener). Touch uses the scroll HUD.
+local bound = false
+local function bindKey(on)
+	if on == bound then return end
+	bound = on
+	if on then
+		CAS:BindAction("InkPaintingUltimate", function(_, state)
+			if state == Enum.UserInputState.Begin then cast() end
+			return Enum.ContextActionResult.Sink
+		end, false, Config.Key)
+	else
+		CAS:UnbindAction("InkPaintingUltimate")
+	end
+end
+local function watch(char)
+	char.ChildAdded:Connect(function(c)
+		if c:IsA("Tool") and c.Name == "Ink Brush" then bindKey(true) end
+	end)
+	char.ChildRemoved:Connect(function(c)
+		if c.Name == "Ink Brush" and not char:FindFirstChild("Ink Brush") then bindKey(false) end
+	end)
+	bindKey(char:FindFirstChild("Ink Brush") ~= nil)
+end
+player.CharacterAdded:Connect(watch)
+if player.Character then watch(player.Character) end
 player.CharacterRemoving:Connect(function()
 	finish(player, nil, true)
 	pending = false
+	bindKey(false)
 end)
 
 -- HUD slot (hidden when the Martial Scroll shows the skills)

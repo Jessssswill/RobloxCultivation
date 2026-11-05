@@ -70,18 +70,19 @@ Config.Tex = {
 	glow = "rbxassetid://243660373", -- already in the place
 }
 
--- Sounds: empty = silent. Filled after an audio search (no new uploads needed for Creator Store sounds).
+-- Sounds: Creator Store effects by ProSoundEffects (Roblox-licensed, free to use, nothing uploaded). Picked by title
+-- on 2026-11-05, not listened to yet: swap any that sound wrong. Empty string = silent.
 Config.Sfx = {
-	raise = "",
-	rise = "",
-	thunder = "",
-	slam = "",
+	raise = "rbxassetid://9114630316", -- Gong Hit Resonant Trail 1
+	rise = "rbxassetid://9120286081", -- Tubular Whoosh Suck Explosive Rise Roar 1
+	thunder = "rbxassetid://9120016037", -- Thunder Cracks Big Rumbling Blasts Booming 1
+	slam = "rbxassetid://9120502978", -- Water Burst Boom Blast Hissing Spray 2 (wet ink slam)
 	roar = "rbxassetid://94467976772299", -- DragonRoarPreload, already in the place
-	flood = "",
-	eye = "",
-	claw = "",
-	demons = "",
-	final = "",
+	flood = "rbxassetid://9120704346", -- Whoosh Deep Booming Blast Reversed A
+	eye = "rbxassetid://9126100633", -- Thunder With Lion Roar Growl Low Rumble Roar
+	claw = "rbxassetid://9116411685", -- Magic Swoosh Fast Zooming Pass Bys 18
+	demons = "rbxassetid://9125909298", -- Screechy Screaming Suck Shrieks With Shimmer
+	final = "rbxassetid://9126083958", -- Synth Thunder Cracks Individual Explosion
 }
 
 local function ease(x)
@@ -109,12 +110,14 @@ function Config.RootOffset(t, lift)
 	return CFrame.new(0, y * (1 - down), z * (1 - down))
 end
 
--- Held brush grows during the ultimate (the colossal phantom brush is separate, see FX).
+-- Held brush: calligraphy size in the shot-1 close-up, grows 3x on the launch, back to the real size at the end
+-- (the colossal phantom brush is separate, see FX).
 function Config.BrushScale(t)
+	local small = 1 - 0.5 * ease(t / 0.25)
 	local grow = math.clamp((t - 0.95) / 0.45, 0, 1)
 	grow = 1 + 2.70158 * (grow - 1) ^ 3 + 1.70158 * (grow - 1) ^ 2 -- ease out back
-	local shrink = ease((t - 6.9) / 0.4)
-	return 1 + 0.6 * grow * (1 - shrink)
+	local big = small + (1.6 - small) * grow
+	return big + (1 - big) * ease((t - 6.9) / 0.4)
 end
 
 return Config

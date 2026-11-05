@@ -104,17 +104,44 @@ function Cinema.New(ctx, fx)
 			pcall(function() StarterGui:SetCoreGuiEnabled(core, false) end)
 		end
 	end
+	-- first person hides the body; the held brush stays hidden (Pose draws its own copy)
 	for _, p in char:GetDescendants() do
-		if p:IsA("BasePart") and p.LocalTransparencyModifier ~= 0 then
+		if p:IsA("BasePart") and p.LocalTransparencyModifier ~= 0 and not (ctx.tool and p:IsDescendantOf(ctx.tool)) then
 			self.transparency[p] = p.LocalTransparencyModifier
 			p.LocalTransparencyModifier = 0
 		end
 	end
+	-- no name tags, health bars or prompts in the painting
+	self.tags = {}
+	local tagRoots = { workspace:FindFirstChild("Monsters"), workspace:FindFirstChild("TownNPCs") }
+	for _, other in Players:GetPlayers() do
+		if other.Character then table.insert(tagRoots, other.Character) end
+	end
+	for _, tagRoot in tagRoots do
+		for _, d in tagRoot:GetDescendants() do
+			if d:IsA("BillboardGui") and d.Enabled then
+				self.tags[d] = true
+				d.Enabled = false
+			end
+		end
+	end
+	local prompts = game:GetService("ProximityPromptService")
+	self.prompts = prompts.Enabled
+	prompts.Enabled = false
+	self.faded = {}
 	CAS:BindActionAtPriority("InkPaintingSink", function() return Enum.ContextActionResult.Sink end, false, 3000,
 		Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.KeyCode.Space, Enum.KeyCode.Z, Enum.KeyCode.X)
 
 	local cc = make("ColorCorrectionEffect", { Name = "InkPaintingGrade" }, camera)
 	self.cc = cc
+	self.expo0 = Lighting.ExposureCompensation -- the ink world is pale paper, not the dark forest floor
+	-- soft key light that follows the caster on the camera side (forest shade would hide the face otherwise)
+	local world = make("Folder", { Name = "InkPaintingCinemaWorld" }, workspace)
+	local keyPart = make("Part", { Name = "KeyLight", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false, Transparency = 1, Size = Vector3.one * 0.2 }, world)
+	local key = make("PointLight", { Color = Color3.fromRGB(255, 238, 220), Range = 16, Brightness = 0, Shadows = false }, keyPart)
+	local overlap = OverlapParams.new()
+	overlap.FilterType = Enum.RaycastFilterType.Exclude
+	overlap.FilterDescendantsInstances = { char, fx.folder, world }
 
 	-- sky + atmosphere (swapped at the shot-2 cut)
 	local sky = Instance.new("Sky")
@@ -146,7 +173,7 @@ function Cinema.New(ctx, fx)
 	end
 	local title = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.962), Size = UDim2.fromScale(0.8, 0.045), BackgroundTransparency = 1, Text = Config.Title, FontFace = TITLE, TextScaled = true, TextColor3 = Color3.fromRGB(240, 232, 216), TextTransparency = 1, ZIndex = 9 }, gui)
 	make("UITextSizeConstraint", { MaxTextSize = 24 }, title)
-	local skip = make("TextButton", { Name = "Skip", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -18, 0.962, 0), Size = UDim2.fromOffset(112, 30), BackgroundColor3 = Color3.fromRGB(20, 18, 20), BackgroundTransparency = 0.35, Text = "LEWATI  ▸▸", FontFace = BODY, TextSize = 14, TextColor3 = Color3.fromRGB(230, 222, 210), AutoButtonColor = true, ZIndex = 10 }, gui)
+	local skip = make("TextButton", { Name = "Skip", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -18, 0.962, 0), Size = UDim2.fromOffset(112, 30), BackgroundColor3 = Color3.fromRGB(20, 18, 20), BackgroundTransparency = 0.35, Text = "LEWATI  >>", FontFace = BODY, TextSize = 14, TextColor3 = Color3.fromRGB(230, 222, 210), AutoButtonColor = true, ZIndex = 10 }, gui)
 	make("UICorner", { CornerRadius = UDim.new(0, 6) }, skip)
 	make("UIStroke", { Color = Color3.fromRGB(150, 140, 130), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, skip)
 	skip.Activated:Connect(function()
@@ -179,22 +206,22 @@ function Cinema.New(ctx, fx)
 	end
 
 	local function shot(t)
-		if t < T.Rise then -- 1 close-up, brush before the face
+		if t < T.Rise then -- 1 close-up, brush before the face (camera on the caster's left, brush on screen left)
 			local head = headPos()
 			local u = ease(t / T.Rise)
-			return (head + f * 5.6 + r * 1.2 - UP * 0.4):Lerp(head + f * 4.3 + r * 0.8 - UP * 0.3, u), head - UP * 0.5 + r * 0.2, 40 - 5 * u
+			return (head + f * 5.2 - r * 1.3 - UP * 0.5):Lerp(head + f * 3.9 - r * 0.9 - UP * 0.45, u), head - UP * 0.55 + r * 0.45, 42 - 5 * u
 		elseif t < T.Tendrils then -- 2 low wide angle into the storm
 			local u = ease(lin(T.Rise, T.Tendrils, t))
-			return ground0 + UP * 1.6 - f * 13 + r * 11 + (r * 2 - f * 2) * u, casterPos() + UP * 1.5, 74 - 6 * u
+			return ground0 + UP * 4 - f * 14 + r * 11 + (r * 2 - f * 2) * u, casterPos() + UP * 1.5, 74 - 6 * u
 		elseif t < T.Stroke then -- 3 over the shoulder, down at the monsters
 			local u = ease(lin(T.Tendrils, T.Stroke, t))
 			return casterPos() - f * 8 + r * 4.5 + UP * (4.5 + u), P + UP * 1.5, 62 - 4 * u
 		elseif t < T.Painting then -- 4 frontal wide, the phantom brush slams, stroke across the frame
 			local u = ease(lin(T.Stroke, T.Painting, t))
-			return P + f * (44 - 3 * u) + UP * 7, P + UP * 13 - f * 6, 64 - 4 * u
+			return P + f * (38 - 3 * u) + UP * 14, P + UP * 9 - f * 6, 66 - 4 * u
 		elseif t < T.Wide then -- 5a low near the stroke, the dragon rises
 			local u = ease(lin(T.Painting, T.Wide, t))
-			return P + f * 16 + r * 12 + UP * (2 + 2 * u), dragonFocus() or (P + UP * 10), 56
+			return P + f * 16 + r * 12 + UP * (5 + 2 * u), dragonFocus() or (P + UP * 10), 58
 		elseif t < T.Black then -- 5b wide: vortex + caster, ink floods the screen
 			local u = ease(lin(T.Wide, T.Black, t))
 			return P + r * (56 - 8 * u) + UP * 14 - f * 10, P + UP * 20 - f * 8, 58 - 3 * u
@@ -223,6 +250,8 @@ function Cinema.New(ctx, fx)
 
 	function self:Update(t)
 		if self.dead then return end
+		-- other scripts (skill endings, freecam) may hand the camera back mid-shot
+		if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
 		-- grade + sky
 		local g = grade(t)
 		local hit = math.exp(-math.max(0, t - T.Impact) * 14) * (t >= T.Impact and 1 or 0)
@@ -231,6 +260,9 @@ function Cinema.New(ctx, fx)
 		cc.Contrast = g[3] + 0.3 * hit + 0.3 * fin
 		cc.Brightness = g[4] + 0.35 * hit + 0.3 * fin
 		cc.TintColor = g[5]
+		local inkLight = lin(T.Sky, T.Sky + 0.3, t) * (1 - lin(T.Red - 0.02, T.Red, t))
+		local hellLight = (t >= T.Red and 1 or 0) * (1 - lin(T.Restore, T.End - 0.1, t))
+		Lighting.ExposureCompensation = self.expo0 + 0.9 * inkLight + 0.2 * hellLight
 		if t >= T.Sky and t < T.Restore + 0.2 and not self.skyOn then
 			self.skyOn = true
 			for _, s in Lighting:GetChildren() do
@@ -278,9 +310,13 @@ function Cinema.New(ctx, fx)
 		-- camera
 		local pos, look, fov = shot(t)
 		local leave = ease(lin(T.Restore, T.End, t))
+		-- terrain and big walls push the camera in; trees and props get faded below instead
 		local hitR = workspace:Raycast(look, pos - look, rp)
-		if hitR and hitR.Instance.CanCollide and hitR.Distance > 2 then
-			pos = hitR.Position + hitR.Normal * 0.7
+		if hitR and hitR.Distance > 2 then
+			local inst = hitR.Instance
+			if inst:IsA("Terrain") or (inst.CanCollide and inst.Size.Magnitude > 60) then
+				pos = hitR.Position + hitR.Normal * 0.7
+			end
 		end
 		local a = shake(t)
 		local cf = CFrame.lookAt(pos, look)
@@ -294,6 +330,42 @@ function Cinema.New(ctx, fx)
 		camera.CFrame = cf
 		camera.Focus = CFrame.new(look)
 		camera.FieldOfView = fov
+
+		-- fade whatever stands between the camera and the subject (like Roblox Invisicam)
+		local c = casterPos()
+		local seen = {}
+		local targets = { look }
+		if t < T.Painting or t >= T.Restore then table.insert(targets, c + UP * 1.5) end
+		local okParts, parts = pcall(camera.GetPartsObscuringTarget, camera, targets, ignore)
+		if okParts then
+			for _, p in parts do
+				if not p:IsA("Terrain") and p.Size.Magnitude < 120 then
+					seen[p] = true
+					if self.faded[p] == nil then
+						self.faded[p] = p.LocalTransparencyModifier
+						p.LocalTransparencyModifier = 0.85
+					end
+				end
+			end
+		end
+		-- grass, branches and monsters right at the lens disappear completely
+		for _, p in workspace:GetPartBoundsInRadius(cf.Position, 7, overlap) do
+			if not p:IsA("Terrain") and p.Size.Magnitude < 150 then
+				seen[p] = true
+				if self.faded[p] == nil then self.faded[p] = p.LocalTransparencyModifier end
+				p.LocalTransparencyModifier = 1
+			end
+		end
+		for p, m in self.faded do
+			if not seen[p] then
+				self.faded[p] = nil
+				if p.Parent then p.LocalTransparencyModifier = m end
+			end
+		end
+		local toCam = cf.Position - c
+		toCam = toCam.Magnitude > 0.1 and toCam.Unit or f
+		keyPart.CFrame = CFrame.new(c + toCam * 6 + UP * 2.5)
+		key.Brightness = 1.1 * (1 - lin(T.Restore, T.End, t))
 	end
 
 	function self:RestoreSky()
@@ -315,6 +387,7 @@ function Cinema.New(ctx, fx)
 		CAS:UnbindAction("InkPaintingSink")
 		CAS:UnbindAction("InkPaintingSkip")
 		self:RestoreSky()
+		Lighting.ExposureCompensation = self.expo0
 		sky:Destroy()
 		cc:Destroy()
 		gui:Destroy()
@@ -327,6 +400,15 @@ function Cinema.New(ctx, fx)
 		for p, m in self.transparency do
 			if p.Parent then p.LocalTransparencyModifier = m end
 		end
+		for p, m in self.faded do
+			if p.Parent then p.LocalTransparencyModifier = m end
+		end
+		self.faded = {}
+		for d in self.tags do
+			if d.Parent then d.Enabled = true end
+		end
+		prompts.Enabled = self.prompts
+		world:Destroy()
 		local root = char:FindFirstChild("HumanoidRootPart")
 		local delta = root and (root.Position - origin.Position) or Vector3.zero
 		if camera and camera.Parent then

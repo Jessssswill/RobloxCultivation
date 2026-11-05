@@ -187,13 +187,17 @@ end
 local function playSound(fx, key, where, volume)
 	local id = Config.Sfx[key]
 	if not id or id == "" then return end
-	local p = part(fx.folder, "Sfx_" .. key, Vector3.one * 0.2, CFrame.new(where))
 	local s = Instance.new("Sound")
 	s.SoundId = id
 	s.Volume = volume or 1
-	s.RollOffMaxDistance = 600
-	s.RollOffMinDistance = 30
-	s.Parent = p
+	if fx.screenGui then
+		s.Parent = fx.screenGui -- caster watching the cutscene: no distance falloff
+	else
+		local p = part(fx.folder, "Sfx_" .. key, Vector3.one * 0.2, CFrame.new(where))
+		s.RollOffMaxDistance = 600
+		s.RollOffMinDistance = 30
+		s.Parent = p
+	end
 	s:Play()
 end
 
