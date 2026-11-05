@@ -162,6 +162,7 @@ local function bindKey(on)
 	if on == bound then return end
 	bound = on
 	if on then
+		Cinema.Prepare() -- background map scan for the cutscene camera (trees the queries cannot see)
 		CAS:BindAction("InkPaintingUltimate", function(_, state)
 			if state == Enum.UserInputState.Begin then cast() end
 			return Enum.ContextActionResult.Sink

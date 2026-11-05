@@ -84,6 +84,17 @@ local function groundRay(pos, ignore)
 	return hit and hit.Position or pos
 end
 
+-- Terrain grass (decoration on) is about a stud tall and swallows flat ground decals: lift the cards over it there.
+local function cardLift(pos, ignore)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	rp.FilterDescendantsInstances = ignore
+	local hit = workspace:Raycast(pos + UP * 3, -UP * 8, rp)
+	local grassy = hit and hit.Instance:IsA("Terrain") and (hit.Material == Enum.Material.Grass or hit.Material == Enum.Material.LeafyGrass)
+	local ok, decorated = pcall(function() return workspace.Terrain.Decoration end)
+	return (grassy and (not ok or decorated)) and 0.9 or 0
+end
+
 -- flat decal on the ground that can grow / fade
 local function groundCard(parent, name, tex, center, color, yaw)
 	local p = part(parent, name, Vector3.new(1, 0.05, 1), CFrame.new(center + UP * 0.07) * CFrame.Angles(0, yaw or 0, 0))
@@ -224,6 +235,9 @@ function FX.New(ctx)
 	end
 	local ignore = { ctx.char, folder }
 	local ground0 = groundRay(origin.Position, ignore)
+	local groundIgnore = { ctx.char, folder }
+	if workspace:FindFirstChild("Monsters") then table.insert(groundIgnore, workspace.Monsters) end
+	local lift0, liftP = cardLift(ground0, groundIgnore), cardLift(P, groundIgnore)
 	local A, B = P - r * 28, P + r * 28
 	local E = P + UP * 58 - f * 6
 
@@ -234,6 +248,14 @@ function FX.New(ctx)
 	local phantom = Pose.Phantom(ctx.tool, 8)
 	phantom.model.Parent = folder
 	phantom:Place(A + UP * 300, -UP, f, 1)
+	local phantomInk = Instance.new("Highlight") -- black ink spear with a red-violet rim (ref 0:05.5)
+	phantomInk.FillColor = BLACK
+	phantomInk.OutlineColor = Color3.fromRGB(255, 80, 150)
+	phantomInk.FillTransparency = 1
+	phantomInk.OutlineTransparency = 1
+	phantomInk.DepthMode = Enum.HighlightDepthMode.Occluded
+	phantomInk.Adornee = phantom.model
+	phantomInk.Parent = phantom.model
 
 	-- 1. brush tip: red-purple glow, ink drips
 	local tipPart = part(folder, "BrushTip", Vector3.one * 0.2, origin)
@@ -259,7 +281,7 @@ function FX.New(ctx)
 	flip2x2(drips)
 
 	-- 2. launch: ink blooms under the caster
-	local launchBleed = groundCard(folder, "LaunchBleed", Tex.bleed, ground0, BLACK)
+	local launchBleed = groundCard(folder, "LaunchBleed", Tex.bleed, ground0 + UP * lift0, BLACK)
 	local launchAtt = Instance.new("Attachment")
 	launchAtt.Parent = part(folder, "LaunchSplash", Vector3.one * 0.2, CFrame.new(ground0 + UP * 0.5))
 	local splashProps = {
@@ -296,8 +318,8 @@ function FX.New(ctx)
 	if tier == 1 then table.remove(rings, 2) end
 
 	-- 4. creeping tendrils at the painting centre + ink climbing every bound monster
-	local tendrils = groundCard(folder, "Tendrils", Tex.tendril, P, BLACK, math.random() * math.pi * 2)
-	local tendrilGlow = groundCard(folder, "TendrilsGlow", Tex.tendril, P + UP * 0.02, HELL)
+	local tendrils = groundCard(folder, "Tendrils", Tex.tendril, P + UP * liftP, BLACK, math.random() * math.pi * 2)
+	local tendrilGlow = groundCard(folder, "TendrilsGlow", Tex.tendril, P + UP * (liftP + 0.02), HELL)
 	tendrilGlow.part.CFrame = tendrils.part.CFrame + UP * 0.02
 	local glowSg = nil
 	local function addVictims()
@@ -350,7 +372,7 @@ function FX.New(ctx)
 	end
 
 	-- 5-6. giant stroke on the ground, revealed left to right while the phantom brush drags across
-	local strokePart = part(folder, "GiantStroke", Vector3.new(56, 0.05, 18), CFrame.fromMatrix(P + UP * 0.12, r, UP))
+	local strokePart = part(folder, "GiantStroke", Vector3.new(56, 0.05, 18), CFrame.fromMatrix(P + UP * (liftP + 0.12), r, UP))
 	local function strokeGui(color, glow)
 		local sg = Instance.new("SurfaceGui")
 		sg.Face = Enum.NormalId.Top
@@ -394,8 +416,8 @@ function FX.New(ctx)
 	impactAtt.Parent = part(folder, "Impact", Vector3.one * 0.2, CFrame.new(P + UP * 1))
 	local impactSplash = emitter(impactAtt, splashProps)
 	flip2x2(impactSplash)
-	local impactBleed = groundCard(folder, "ImpactBleed", Tex.bleed, P + UP * 0.03, BLACK, 1.3)
-	local finalBleed = groundCard(folder, "FinalBleed", Tex.bleed, P + UP * 0.05, DARK_RED, 2.4)
+	local impactBleed = groundCard(folder, "ImpactBleed", Tex.bleed, P + UP * (liftP + 0.03), BLACK, 1.3)
+	local finalBleed = groundCard(folder, "FinalBleed", Tex.bleed, P + UP * (liftP + 0.05), DARK_RED, 2.4)
 
 	-- 9. ink vortex pouring from the sky onto the centre
 	local V = P + UP * 72
@@ -446,7 +468,7 @@ function FX.New(ctx)
 	local dragonOrigin = CFrame.lookAt(P - f * 12.8 + UP * 2.65, P - f * 11.8 + UP * 2.65)
 
 	-- 10. viewers without the screen flood still see the world swallowed by ink
-	local floodBleed = groundCard(folder, "FloodBleed", Tex.bleed, P + UP * 0.09, BLACK, 0.4)
+	local floodBleed = groundCard(folder, "FloodBleed", Tex.bleed, P + UP * (liftP + 0.09), BLACK, 0.4)
 
 	-- 11-13. sky: hell eye, claw tears, hundred demons
 	local eye = skyCard(fx, Tex.eye, nil, 0)
@@ -584,6 +606,8 @@ function FX.New(ctx)
 				alpha = 1 - u
 			end
 			phantom:Place(tip, dir, f, 1 - alpha)
+			phantomInk.FillTransparency = 1 - 0.9 * alpha
+			phantomInk.OutlineTransparency = 1 - 0.8 * alpha
 			dragPart.CFrame = CFrame.new(tip)
 			dragSpray.Rate = (t >= T.Slam and t < 3.06) and 220 * k or 0
 		else

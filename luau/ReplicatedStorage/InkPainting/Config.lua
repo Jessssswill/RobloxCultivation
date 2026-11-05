@@ -113,7 +113,7 @@ end
 -- Held brush: calligraphy size in the shot-1 close-up, grows 3x on the launch, back to the real size at the end
 -- (the colossal phantom brush is separate, see FX).
 function Config.BrushScale(t)
-	local small = 1 - 0.5 * ease(t / 0.25)
+	local small = 1 - 0.78 * ease(t / 0.25) -- shot 1: hand-sized, the tip ends by the mouth (ref 0:03.5)
 	local grow = math.clamp((t - 0.95) / 0.45, 0, 1)
 	grow = 1 + 2.70158 * (grow - 1) ^ 3 + 1.70158 * (grow - 1) ^ 2 -- ease out back
 	local big = small + (1.6 - small) * grow
