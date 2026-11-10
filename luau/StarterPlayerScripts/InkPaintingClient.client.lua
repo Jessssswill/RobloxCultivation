@@ -1,5 +1,5 @@
 -- InkPaintingClient (LocalScript) -> StarterPlayer.StarterPlayerScripts.InkPaintingClient
--- Ink Brush ultimate on T, "Hundred Demons Scroll" (2026-11-05). Replaces InkDanceClient (old T Ink Dragon,
+-- Ink Brush ultimate on G (T until 2026-11-10), "Hundred Demons Scroll" (2026-11-05). Replaces InkDanceClient (old T Ink Dragon,
 -- archived). Input + HUD slot for the local player; plays every caster's ultimate (pose, brush, world FX) and the
 -- cutscene for the local caster. Keeps the old HUD names (InkDanceHUD / InkQiCastUltimate) so the scroll HUD still works.
 local Players = game:GetService("Players")
@@ -155,7 +155,8 @@ remote.OnClientEvent:Connect(function(action, ...)
 	end
 end)
 
--- T is bound only while the brush is out, so T keeps working for the steed / sword riding / demon form otherwise
+-- The key (Config.Key, G) is bound only while the brush is out. CAS marks it game-processed, so with the brush out
+-- QiClient's old Galaxy Blade on G (it equips the starter sword) and the sword ultimates ignore it.
 -- (a CAS binding marks the key as game-processed for every UserInputService listener). Touch uses the scroll HUD.
 local bound = false
 local function bindKey(on)
@@ -198,7 +199,7 @@ uiCast.Event:Connect(cast)
 local slot = make("Frame", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 127, 0.81, 0), Size = UDim2.fromOffset(70, 70), BackgroundColor3 = Color3.fromRGB(27, 22, 25), Visible = false }, hud)
 make("UICorner", { CornerRadius = UDim.new(0, 8) }, slot)
 make("UIStroke", { Color = Color3.fromRGB(176, 60, 52), Thickness = 2 }, slot)
-make("TextLabel", { Position = UDim2.fromOffset(6, 3), Size = UDim2.fromOffset(24, 23), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "T", TextSize = 20, TextColor3 = Color3.fromRGB(245, 236, 221) }, slot)
+make("TextLabel", { Position = UDim2.fromOffset(6, 3), Size = UDim2.fromOffset(24, 23), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = Config.Key.Name, TextSize = 20, TextColor3 = Color3.fromRGB(245, 236, 221) }, slot)
 make("TextLabel", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromScale(0.5, 0.96), Size = UDim2.new(1, -4, 0, 26), BackgroundTransparency = 1, FontFace = TITLE, Text = Config.Short, TextScaled = true, TextColor3 = Color3.fromRGB(224, 216, 205) }, slot)
 local timer = make("TextLabel", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "", TextSize = 23, TextColor3 = Color3.new(1, 1, 1) }, slot)
 Run.Heartbeat:Connect(function()

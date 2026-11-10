@@ -1,5 +1,5 @@
 -- InkPaintingServer (Script) -> ServerScriptService.InkPaintingServer
--- Server side of the Ink Brush ultimate on T, "Hundred Demons Scroll" (2026-11-05). Replaces InkDanceServer (old T
+-- Server side of the Ink Brush ultimate on G (T until 2026-11-10), "Hundred Demons Scroll" (2026-11-05). Replaces InkDanceServer (old T
 -- Ink Dragon, archived in ServerStorage). Validates the cast, flies the caster (anchored root, same curve the
 -- clients use), binds monsters around the painting centre and deals the hits. Clients draw everything.
 local Players = game:GetService("Players")

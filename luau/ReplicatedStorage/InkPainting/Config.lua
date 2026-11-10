@@ -1,5 +1,5 @@
 -- InkPainting/Config (ModuleScript) -> ReplicatedStorage.InkPainting.Config
--- Ink Brush ultimate on T: "Hundred Demons Scroll" (百魔图), an ink-painting cutscene. Replaces the old T Ink Dragon
+-- Ink Brush ultimate on G (moved from T on 2026-11-10, will): "Hundred Demons Scroll" (百魔图), an ink-painting cutscene. Replaces the old T Ink Dragon
 -- (2026-11-05, will picked it on the decision card). Shot plan v1: project files assets/InkBrush/cutscene/Shot plan v1.png
 -- Shared by server + clients. All times are seconds since the cast started (server clock).
 local Config = {}
@@ -7,7 +7,7 @@ local Config = {}
 Config.Name = "Hundred Demons Scroll"
 Config.Short = "Hundred Demons"
 Config.Title = "百  魔  图    ·    H U N D R E D   D E M O N S   S C R O L L"
-Config.Key = Enum.KeyCode.T
+Config.Key = Enum.KeyCode.G -- will 2026-11-10: same key as the sword ultimates (was T)
 Config.Duration = 7.5
 Config.Cooldown = 60
 Config.StudioCooldown = 4 -- short in Studio so it is easy to watch again
