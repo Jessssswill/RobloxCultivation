@@ -49,25 +49,23 @@ Config.T = {
 	End = 7.5,
 }
 
--- Textures. Self-made (assets/InkBrush/vfx/make_ink_textures_v1.py + _v2.py). Until will OKs the upload they load from the
--- Studio content folder on his laptop (content/textures/QiInk), so they ONLY show in his Studio. After the upload,
--- swap these to rbxassetid:// ids.
-local LOCAL = "rbxasset://textures/QiInk/"
+-- Textures. Self-made (assets/InkBrush/vfx/make_ink_textures_v1.py + _v2.py), uploaded to will's account on
+-- 2026-11-10 (ids also in assets/InkBrush/vfx/ASSET_IDS.txt).
 Config.Tex = {
-	stroke = LOCAL .. "ink_stroke.png", -- beams
-	strokeGround = LOCAL .. "ink_stroke_ground.png", -- v2: the giant stroke card on the ground (margin, no straight edges)
-	splat = LOCAL .. "ink_splat_flip.png", -- 2x2
-	tendril = LOCAL .. "ink_tendril.png",
-	bleed = LOCAL .. "ink_bleed.png",
-	bleedWhite = LOCAL .. "ink_bleed_white.png", -- v2: white pigment, for tinted floods (black ink times red stays black)
-	cloud = LOCAL .. "ink_cloud_flip.png", -- 2x2
-	paper = LOCAL .. "ink_paper.png",
-	vignette = LOCAL .. "ink_vignette.png",
-	eye = LOCAL .. "hell_eye_flip.png", -- 2x2, closed -> open, pre-coloured
-	claw = LOCAL .. "claw_slash_v2.png", -- v2: the v1 tears ran off the texture border (straight cut ends in shot 7)
-	demon = LOCAL .. "demon_face_flip.png", -- 2x2
-	skySide = { LOCAL .. "ink_sky_side0.png", LOCAL .. "ink_sky_side1.png", LOCAL .. "ink_sky_side2.png", LOCAL .. "ink_sky_side3.png" },
-	skyUp = LOCAL .. "ink_sky_up.png",
+	stroke = "rbxassetid://104748411009739", -- beams
+	strokeGround = "rbxassetid://88943818598670", -- v2: the giant stroke card on the ground (margin, no straight edges)
+	splat = "rbxassetid://97531826507954", -- 2x2
+	tendril = "rbxassetid://84803686198511",
+	bleed = "rbxassetid://74604303133527",
+	bleedWhite = "rbxassetid://70484678978796", -- v2: white pigment, for tinted floods (black ink times red stays black)
+	cloud = "rbxassetid://104362448609541", -- 2x2
+	paper = "rbxassetid://71061011564945",
+	vignette = "rbxassetid://101177830203670",
+	eye = "rbxassetid://81584309648879", -- 2x2, closed -> open, pre-coloured
+	claw = "rbxassetid://137069074844889", -- v2: the v1 tears ran off the texture border (straight cut ends in shot 7)
+	demon = "rbxassetid://89773600359935", -- 2x2
+	skySide = { "rbxassetid://102311474683926", "rbxassetid://107888920229869", "rbxassetid://101525768316954", "rbxassetid://75157940830124" },
+	skyUp = "rbxassetid://111565612918466",
 	fire = "rbxassetid://125606840536264", -- already in the place (InkSlash Fire11, 4x4 flipbook)
 	glow = "rbxassetid://243660373", -- already in the place
 }
