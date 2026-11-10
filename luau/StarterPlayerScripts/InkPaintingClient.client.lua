@@ -60,7 +60,7 @@ local function finish(caster, id, notify)
 	end
 end
 
-local function begin(caster, id, origin, P, lift, serverStart, cooldown)
+local function begin(caster, id, origin, P, lift, serverStart, cooldown, plan)
 	finish(caster, nil, false)
 	local char = caster.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -88,7 +88,8 @@ local function begin(caster, id, origin, P, lift, serverStart, cooldown)
 	end
 	local ok, err = pcall(function()
 		local cutscene = isMe and player:GetAttribute("UltCutscene") ~= false
-		local ctx = { char = char, tool = t, origin = origin, P = P, lift = lift, tier = tier, screenSky = cutscene }
+		Config.PreparePlan(plan) -- v2 dash path from the server (nil: the caster stays in the storm for act 2)
+		local ctx = { char = char, tool = t, origin = origin, P = P, lift = lift, tier = tier, screenSky = cutscene, plan = plan }
 		s.fx = FX.New(ctx)
 		if cutscene then s.cinema = Cinema.New(ctx, s.fx) end
 		table.insert(s.connections, Run.PreSimulation:Connect(function()
@@ -96,15 +97,19 @@ local function begin(caster, id, origin, P, lift, serverStart, cooldown)
 				finish(caster, id, isMe)
 				return
 			end
-			local time = elapsed()
-			local rootCF = origin * Config.RootOffset(time, lift)
+			local tau = math.max(0, elapsed())
+			local story = Config.Story(tau)
+			local rootCF = Config.RootCF(story, origin, lift, plan)
 			root.CFrame = rootCF
-			s.fx:Update(math.max(0, time), rootCF)
-			if time > Config.Duration + 0.4 then finish(caster, id, false) end
+			s.fx:Update(story, rootCF, tau)
+			if tau > Config.Duration + 0.4 then finish(caster, id, false) end
 		end))
 		if s.cinema then
 			table.insert(s.connections, Run.RenderStepped:Connect(function()
-				if s.cinema and not s.cinema.dead then s.cinema:Update(math.max(0, elapsed())) end
+				if s.cinema and not s.cinema.dead then
+					local tau = math.max(0, elapsed())
+					s.cinema:Update(Config.Story(tau), tau)
+				end
 			end))
 		end
 		if isMe then
@@ -155,9 +160,9 @@ remote.OnClientEvent:Connect(function(action, ...)
 	end
 end)
 
--- The key (Config.Key, G) is bound only while the brush is out. CAS marks it game-processed, so with the brush out
--- QiClient's old Galaxy Blade on G (it equips the starter sword) and the sword ultimates ignore it.
--- (a CAS binding marks the key as game-processed for every UserInputService listener). Touch uses the scroll HUD.
+-- The key (Config.Key, G) is bound only while the brush is out. A CAS binding marks the key game-processed for every
+-- UserInputService listener, so with the brush out QiClient's old Galaxy Blade on G (it equips the starter sword) and
+-- the sword ultimates ignore it. Touch uses the scroll HUD.
 local bound = false
 local function bindKey(on)
 	if on == bound then return end

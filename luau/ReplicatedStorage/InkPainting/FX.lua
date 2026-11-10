@@ -1,7 +1,9 @@
 -- InkPainting/FX (ModuleScript) -> ReplicatedStorage.InkPainting.FX
--- World effects of the T ultimate, built on every client that sees the cast. The caster's own camera work, sky and
+-- World effects of the G ultimate, built on every client that sees the cast. The caster's own camera work, sky and
 -- colour grade live in Cinema. ctx = {char, tool, origin (CFrame facing the painting), P (ground point), lift,
--- tier (1..3, phones = 1), screenSky (caster with cutscene on: sky cards drawn on screen so the grade cannot grey them)}
+-- tier (1..3, phones = 1), screenSky (caster with cutscene on: sky cards drawn on screen so the grade cannot grey them),
+-- plan (v2 dash path from the server, Config.MakePlan)}.
+-- fx:Update(s, rootCF, tau) takes story time; the v1 effects below run on v1 time t = Config.V1(s).
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local Config = require(script.Parent:WaitForChild("Config"))
@@ -309,7 +311,7 @@ function FX.New(ctx)
 
 	-- 3. storm clouds around the caster (locked to a slowly turning part = swirling storm)
 	local cloudCenter = ground0 + UP * (ctx.lift * 0.85)
-	local cloudLife = 7.35 - T.Sky
+	local cloudLife = Config.Tau(Config.SAtV1(7.35)) - Config.Tau(Config.SAtV1(T.Sky)) -- the storm lasts the whole cast
 	local function cloudRing(size, n, shade, sizeMin, sizeMax)
 		local p = part(folder, "StormClouds", size, CFrame.new(cloudCenter))
 		local e = emitter(p, {
@@ -347,7 +349,7 @@ function FX.New(ctx)
 			end
 		end
 		table.sort(list, function(a, b) return a.d < b.d end)
-		local maxN = tier == 1 and 4 or 8
+		local maxN = tier == 1 and 5 or 10
 		for i = 1, math.min(#list, maxN) do
 			local v = list[i]
 			local hl = Instance.new("Highlight")
@@ -523,6 +525,151 @@ function FX.New(ctx)
 	fireLight.Shadows = false
 	fireLight.Parent = firePart
 
+	-- v2 act 2: the three dash strokes of the Z, painted on the ground under the caster's brush, each erupting when
+	-- the caster leaves it; v2 act 5: every stroke explodes around the planted brush
+	local plan = ctx.plan
+	local dashes = {}
+	local hitPart, hitSplash, hitFlash, demonRise, dashPart, dashSpray, trail, trailPart, ringAtt, ring, finalGlow
+	if plan then
+		local W, PX = 16, 16 -- card width (the ink band is about half of it), canvas pixels per stud
+		for i, pts in plan.strokes do
+			local cum, L = plan.cum[i], plan.len[i]
+			local d = { cards = {}, len = L, revealed = 0, passed = {}, erupted = false }
+			local step = tier == 1 and 2 or 1
+			local j = 1
+			while j < #pts do
+				local j2 = math.min(j + step, #pts)
+				local a, b = pts[j], pts[j2]
+				local seg = b - a
+				local d3 = seg.Magnitude > 0.01 and seg.Unit or plan.dir[i]
+				local side = d3:Cross(UP)
+				side = side.Magnitude > 0.01 and side.Unit or r
+				local n = side:Cross(d3).Unit
+				local segLen = cum[j2] - cum[j]
+				-- a Top-face SurfaceGui runs canvas X along the part's -Z: -Z = the stroke direction, canvas left = start
+				local card = part(folder, "DashStroke", Vector3.new(W, 0.05, seg.Magnitude + 0.15), CFrame.fromMatrix((a + b) / 2 + n * 0.04, d3:Cross(n), n))
+				local sg = Instance.new("SurfaceGui")
+				sg.Face = Enum.NormalId.Top
+				sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+				sg.CanvasSize = Vector2.new(math.max(8, math.floor(segLen * PX)), W * PX)
+				sg.LightInfluence = 1
+				sg.AlwaysOnTop = false
+				sg.Adornee = card
+				sg.Parent = card
+				local clip = Instance.new("Frame")
+				clip.BackgroundTransparency = 1
+				clip.ClipsDescendants = true
+				clip.Size = UDim2.fromScale(0, 1)
+				clip.Parent = sg
+				local img = Instance.new("ImageLabel")
+				img.BackgroundTransparency = 1
+				img.Image = Tex.strokeGround or Tex.stroke
+				img.ImageColor3 = BLACK
+				img.ImageTransparency = 0.02
+				img.Size = UDim2.fromOffset(math.floor(L * PX), W * PX) -- one texture over the whole stroke, each card shows its slice
+				img.Position = UDim2.fromOffset(-math.floor(cum[j] * PX), 0)
+				img.Parent = clip
+				table.insert(d.cards, { from = cum[j], len = math.max(segLen, 0.01), clip = clip, img = img, shown = -1 })
+				j = j2
+			end
+			-- eruption (ink geyser along the whole stroke) + fire for the final
+			local a, b = pts[1], pts[#pts]
+			local mid = (a + b) / 2 + UP * 0.8
+			local ePart = part(folder, "DashErupt", Vector3.new(3.5, 1, L), CFrame.lookAt(mid, mid + plan.dir[i]))
+			d.erupt = emitter(ePart, {
+				Texture = Tex.splat, Color = ColorSequence.new(BLACK), Size = seq({ { 0, 1.4 }, { 0.15, 3.4 }, { 1, 1 } }),
+				Squash = seq({ { 0, 1.4 }, { 0.5, 0.8 }, { 1, 0 } }), Orientation = Enum.ParticleOrientation.VelocityParallel,
+				Transparency = seq({ { 0, 0 }, { 0.8, 0.15 }, { 1, 1 } }), Lifetime = NumberRange.new(0.55, 0.95),
+				Speed = NumberRange.new(30, 62), SpreadAngle = Vector2.new(14, 14), Acceleration = Vector3.new(0, -95, 0),
+				EmissionDirection = Enum.NormalId.Top, Shape = Enum.ParticleEmitterShape.Box,
+				ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+			flip2x2(d.erupt)
+			d.fire = emitter(ePart, {
+				Texture = Tex.fire, Color = FIRE, LightEmission = 1, Size = seq({ { 0, 3 }, { 0.4, 6.5 }, { 1, 2 } }),
+				Transparency = seq({ { 0, 0.2 }, { 0.7, 0.35 }, { 1, 1 } }), Lifetime = NumberRange.new(0.5, 0.9),
+				Speed = NumberRange.new(8, 18), EmissionDirection = Enum.NormalId.Top, SpreadAngle = Vector2.new(15, 15),
+				Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+				Rotation = NumberRange.new(-20, 20), Acceleration = Vector3.new(0, 6, 0),
+			})
+			d.fire.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4
+			d.fire.FlipbookMode = Enum.ParticleFlipbookMode.OneShot
+			if tier >= 2 then
+				d.light = Instance.new("PointLight")
+				d.light.Color = Color3.fromRGB(255, 90, 40)
+				d.light.Range = 34
+				d.light.Brightness = 0
+				d.light.Shadows = false
+				d.light.Parent = ePart
+			end
+			dashes[i] = d
+		end
+		-- one set of hit effects, moved onto each monster as it gets hit
+		hitPart = part(folder, "DashHit", Vector3.one * 0.2, CFrame.new(P))
+		local hitAtt = Instance.new("Attachment")
+		hitAtt.Parent = hitPart
+		hitSplash = emitter(hitAtt, {
+			Texture = Tex.splat, Color = ColorSequence.new(BLACK), Size = seq({ { 0, 0.8 }, { 0.15, 2.4 }, { 1, 1 } }),
+			Transparency = seq({ { 0, 0 }, { 0.7, 0.15 }, { 1, 1 } }), Lifetime = NumberRange.new(0.35, 0.6),
+			Speed = NumberRange.new(18, 36), SpreadAngle = Vector2.new(180, 180), Acceleration = Vector3.new(0, -60, 0),
+			Rotation = NumberRange.new(-180, 180), RotSpeed = NumberRange.new(-160, 160), Drag = 1.5,
+		})
+		flip2x2(hitSplash)
+		hitFlash = emitter(hitAtt, { -- white star burst: stays white under the grey grade
+			Texture = Tex.glow, Color = ColorSequence.new(Color3.new(1, 1, 1)), LightEmission = 1,
+			Size = seq({ { 0, 2 }, { 0.3, 9 }, { 1, 11 } }), Transparency = seq({ { 0, 0 }, { 1, 1 } }),
+			Lifetime = NumberRange.new(0.12, 0.16), Speed = NumberRange.new(0),
+		})
+		demonRise = emitter(dashes[#dashes].erupt.Parent, { -- stroke 3 lets the first demons out of the ground
+			Texture = Tex.demon, Color = ColorSequence.new(Color3.fromRGB(36, 33, 38)), Size = seq({ { 0, 3 }, { 0.3, 7 }, { 1, 9 } }),
+			Transparency = seq({ { 0, 1 }, { 0.1, 0.05 }, { 0.75, 0.2 }, { 1, 1 } }), Lifetime = NumberRange.new(0.9, 1.2),
+			Speed = NumberRange.new(10, 20), SpreadAngle = Vector2.new(12, 12), EmissionDirection = Enum.NormalId.Top,
+			Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			Rotation = NumberRange.new(-12, 12),
+		})
+		flip2x2(demonRise)
+		-- brush spray where the ink is being laid
+		dashPart = part(folder, "DashSpray", Vector3.one * 0.2, CFrame.new(P))
+		local sprayAtt = Instance.new("Attachment")
+		sprayAtt.Parent = dashPart
+		dashSpray = emitter(sprayAtt, {
+			Texture = Tex.splat, Color = ColorSequence.new(BLACK), Size = seq({ { 0, 0.8 }, { 0.2, 2 }, { 1, 0.6 } }),
+			Transparency = seq({ { 0, 0 }, { 0.75, 0.2 }, { 1, 1 } }), Lifetime = NumberRange.new(0.35, 0.7),
+			Speed = NumberRange.new(10, 24), SpreadAngle = Vector2.new(55, 55), Acceleration = Vector3.new(0, -55, 0),
+			Rotation = NumberRange.new(-180, 180), RotSpeed = NumberRange.new(-120, 120), EmissionDirection = Enum.NormalId.Top,
+		})
+		flip2x2(dashSpray)
+		-- speed streak behind the caster
+		trailPart = part(folder, "DashTrail", Vector3.one * 0.2, ctx.origin)
+		local t0, t1a = Instance.new("Attachment"), Instance.new("Attachment")
+		t0.Position, t1a.Position = Vector3.new(0, 1.6, 0), Vector3.new(0, -1.9, 0)
+		t0.Parent, t1a.Parent = trailPart, trailPart
+		trail = Instance.new("Trail")
+		trail.Attachment0, trail.Attachment1 = t0, t1a
+		trail.Texture = Tex.stroke
+		trail.Color = ColorSequence.new(BLACK)
+		trail.LightInfluence = 0
+		trail.Lifetime = 0.22
+		trail.MinLength = 0.05
+		trail.FaceCamera = true
+		trail.Transparency = seq({ { 0, 0.15 }, { 1, 1 } })
+		trail.WidthScale = seq({ { 0, 1 }, { 1, 0.35 } })
+		trail.Enabled = false
+		trail.Parent = trailPart
+		-- the final: an ink shockwave ring round the planted brush + a red flash on the ground
+		local ringPart = part(folder, "FinalRing", Vector3.one * 0.2, CFrame.new(plan.land + UP * 1.4))
+		ringAtt = Instance.new("Attachment")
+		ringAtt.Parent = ringPart
+		ring = emitter(ringAtt, {
+			Texture = Tex.splat, Color = ColorSequence.new(DARK_RED, BLACK), Size = seq({ { 0, 4 }, { 0.3, 9 }, { 1, 12 } }),
+			Transparency = seq({ { 0, 0.05 }, { 0.75, 0.25 }, { 1, 1 } }), Lifetime = NumberRange.new(0.9, 1.25),
+			Speed = NumberRange.new(85, 120), Drag = 2.6, SpreadAngle = Vector2.new(6, 4),
+			EmissionDirection = Enum.NormalId.Front, Rotation = NumberRange.new(-180, 180), RotSpeed = NumberRange.new(-60, 60),
+		})
+		flip2x2(ring)
+		finalGlow = groundCard(folder, "FinalGlow", Tex.glow, plan.land + UP * 0.25, HELL)
+	end
+
 	-- cues that fire once
 	local function cue(name, at, fn)
 		table.insert(fx.cues, { name = name, t = at, fn = fn })
@@ -542,8 +689,8 @@ function FX.New(ctx)
 		playSound(fx, "slam", P, 1.2)
 	end)
 	cue("roar", T.Painting + 0.25, function() playSound(fx, "roar", P, 0.7) end)
-	cue("vortexHit1", Config.Hits[2].t, function() impactSplash:Emit(math.floor(10 * k)) end)
-	cue("vortexHit2", Config.Hits[3].t, function() impactSplash:Emit(math.floor(10 * k)) end)
+	cue("vortexHit1", T.Wide, function() impactSplash:Emit(math.floor(10 * k)) end)
+	cue("vortexHit2", T.Wide + 0.35, function() impactSplash:Emit(math.floor(10 * k)) end)
 	cue("flood", T.Flood, function() playSound(fx, "flood", P, 1) end)
 	cue("eye", T.Eye, function() playSound(fx, "eye", E, 1) end)
 	cue("claw", T.Claws, function() playSound(fx, "claw", E, 1) end)
@@ -555,12 +702,163 @@ function FX.New(ctx)
 		playSound(fx, "final", P, 1.3)
 	end)
 
+	-- v2 cues run on story time
+	local cuesS = {}
+	local function cueS(name, at, fn)
+		table.insert(cuesS, { name = name, t = at, fn = fn })
+	end
+	local A, St = Config.Act, Config.Strokes
+	if plan then
+		cueS("dive", A.Dive, function() playSound(fx, "rise", origin.Position, 0.55) end)
+		for i, st in St do
+			cueS("dash" .. i, st.from, function() playSound(fx, "claw", plan.strokes[i][1], 1) end)
+		end
+		cueS("leap", A.Leap, function() playSound(fx, "rise", origin.Position, 0.5) end)
+		cueS("plant", A.Final, function()
+			for _, d in dashes do
+				d.erupt:Emit(math.floor(45 * k))
+				d.fire:Emit(math.floor(30 * k))
+			end
+			local n = tier == 1 and 16 or 28
+			for i = 1, n do
+				ringAtt.CFrame = CFrame.Angles(0, (i + math.random()) * math.pi * 2 / n, 0)
+				ring:Emit(tier == 1 and 2 or 3)
+			end
+			playSound(fx, "slam", plan.land, 1.3)
+			playSound(fx, "thunder", plan.land, 0.8)
+		end)
+	end
+
+	-- monster hits: a white flash + a jolt (pass), or thrown up (eruption). Bound monsters are anchored by the server,
+	-- so the jolt is a local CFrame offset that ends exactly where it started.
+	local function kick(v, s, kind, dir)
+		v.kicks = v.kicks or {}
+		table.insert(v.kicks, { s = s, kind = kind, dir = dir })
+		v.flash = s
+		hitPart.CFrame = CFrame.new(v.root.Position + UP)
+		hitSplash:Emit(math.floor((kind == "pass" and 10 or 16) * k))
+		hitFlash:Emit(1)
+	end
+
+	local function updateDashes(s, t, info)
+		for i, d in dashes do
+			local st = St[i]
+			if s >= st.from then
+				local prog = math.min(Config.StrokeProgress(plan, i, s), d.len) -- where the caster is
+				if s >= st.to then
+					d.revealed = d.len
+				else
+					local tipAlong = Config.StrokeProject(plan, i, info.tip) -- the ink follows the brush tip
+					d.revealed = math.clamp(math.max(d.revealed, math.min(prog, tipAlong + 1.5)), 0, d.len)
+				end
+				local col = t > T.Red and DARK_RED or BLACK
+				local fade = 0.02 + 0.98 * lin(T.Restore, T.End - 0.1, t)
+				for _, c in d.cards do
+					local w = math.clamp((d.revealed - c.from) / c.len, 0, 1)
+					if math.abs(w - c.shown) > 1e-3 then
+						c.shown = w
+						c.clip.Size = UDim2.fromScale(w, 1)
+					end
+					c.img.ImageColor3 = col
+					c.img.ImageTransparency = fade
+				end
+				if s < st.to then
+					dashPart.CFrame = CFrame.new(Config.StrokeAt(plan, i, d.revealed) + UP * 0.4)
+					for _, v in fx.victims do
+						if not d.passed[v] and v.root.Parent then
+							local along, side = Config.StrokeProject(plan, i, v.root.Position)
+							if side <= Config.StrokeHit.passWidth and along >= -3 and along <= prog + 1 then
+								d.passed[v] = true
+								kick(v, s, "pass", plan.dir[i])
+								fx.hitPulse = s
+							end
+						end
+					end
+				end
+				if s >= st.erupt and not d.erupted then
+					d.erupted = true
+					d.erupt:Emit(math.floor(70 * k))
+					if i == #dashes then demonRise:Emit(math.floor(12 * k)) end
+					playSound(fx, "slam", Config.StrokeAt(plan, i, d.len * 0.5), 1.1)
+					for _, v in fx.victims do
+						if v.root.Parent then
+							local along, side = Config.StrokeProject(plan, i, v.root.Position)
+							if side <= Config.StrokeHit.eruptWidth and along >= -4 and along <= d.len + 4 then kick(v, s, "erupt") end
+						end
+					end
+				end
+				if d.light then d.light.Brightness = 3.2 * window(t, T.Final, 0.08, T.End, 0.5) end
+				d.fire.Rate = (t >= T.Final and t < T.Restore + 0.25) and 14 * k or 0
+			end
+		end
+		local dashing = false
+		for _, st in St do
+			if s >= st.from and s < st.to then dashing = true end
+		end
+		dashSpray.Rate = dashing and 170 * k or 0
+		trailPart.CFrame = fx.rootCF
+		trail.Enabled = s >= A.Dive and s < A.Resume
+		-- the final flash on the ground
+		local fg = lin(A.Final, A.Final + 0.4, s)
+		finalGlow.set(10 + 100 * outCubic(fg), fg <= 0 and 1 or (0.15 + 0.85 * fg), HELL)
+	end
+
+	local function updateVictims(s)
+		for _, v in fx.victims do
+			if v.kicks and #v.kicks > 0 then
+				if v.root.Parent and v.root.Anchored and s < A.Final - 0.1 then
+					if not v.base then v.base = v.root.CFrame end
+					local off, live = Vector3.zero, false
+					for _, kk in v.kicks do
+						local age = s - kk.s
+						if kk.kind == "pass" then
+							local u = age / 0.3
+							if u < 1 then
+								live = true
+								off += (UP * 1.2 + kk.dir * 1.6) * math.sin(math.pi * u)
+							end
+						else
+							local u = age / 0.62
+							if u < 1 then
+								live = true
+								off += UP * 5.5 * (4 * u * (1 - u))
+							end
+						end
+					end
+					if live then
+						v.root.CFrame = v.base + off
+					else
+						v.root.CFrame = v.base
+						v.base, v.kicks = nil, {}
+					end
+				else
+					if v.base and v.root.Parent and v.root.Anchored then v.root.CFrame = v.base end
+					v.base, v.kicks = nil, {}
+				end
+			end
+			if v.flash then
+				local fa = math.clamp((s - v.flash) / 0.14, 0, 1)
+				v.hl.FillColor = Color3.new(1, 1, 1):Lerp(BLACK, fa)
+				if fa >= 1 then v.flash = nil end
+			end
+		end
+	end
+
 	local dragon
-	function fx:Update(t, rootCF)
-		local info = pose:Update(t, rootCF)
+	function fx:Update(s, rootCF, tau)
+		local t = Config.V1(s)
+		fx.s, fx.rootCF = s, rootCF
+		local info = pose:Update(s, rootCF)
 		fx.tip = info.tip
 		for _, c in fx.cues do
 			if not c.done and t >= c.t then
+				c.done = true
+				local ok, err = pcall(c.fn)
+				if not ok then warn("[InkPainting] cue " .. c.name .. ": " .. tostring(err)) end
+			end
+		end
+		for _, c in cuesS do
+			if not c.done and s >= c.t then
 				c.done = true
 				local ok, err = pcall(c.fn)
 				if not ok then warn("[InkPainting] cue " .. c.name .. ": " .. tostring(err)) end
@@ -584,7 +882,7 @@ function FX.New(ctx)
 
 		-- swirl
 		for i, ring in rings do
-			ring.part.CFrame = CFrame.new(cloudCenter) * CFrame.Angles(0, t * (i == 1 and 0.3 or -0.45), 0)
+			ring.part.CFrame = CFrame.new(cloudCenter) * CFrame.Angles(0, s * (i == 1 and 0.3 or -0.45), 0)
 		end
 
 		-- tendrils
@@ -725,10 +1023,22 @@ function FX.New(ctx)
 		local fireOn = t > T.Demons + 0.05 and t < T.Restore + 0.25
 		fire.Rate = fireOn and (t >= T.Final and 90 or 25) * k or 0
 		fireLight.Brightness = 4 * window(t, T.Demons + 0.05, 0.2, T.End, 0.5)
+
+		if plan then
+			local ok, err = pcall(updateDashes, s, t, info)
+			if not ok and not fx.warned then
+				fx.warned = true
+				warn("[InkPainting] dashes: " .. tostring(err))
+			end
+		end
+		updateVictims(s)
 		return info
 	end
 
 	function fx:Destroy()
+		for _, v in fx.victims do -- a monster still mid-jolt goes back where the server holds it
+			if v.base and v.root.Parent and v.root.Anchored then v.root.CFrame = v.base end
+		end
 		pcall(function() pose:Destroy() end)
 		if dragon then pcall(function() dragon:Destroy() end) end
 		if not fx.phantomGone then pcall(function() phantom:Destroy() end) end

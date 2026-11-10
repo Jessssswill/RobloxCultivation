@@ -1,7 +1,8 @@
 -- InkPaintingServer (Script) -> ServerScriptService.InkPaintingServer
 -- Server side of the Ink Brush ultimate on G (T until 2026-11-10), "Hundred Demons Scroll" (2026-11-05). Replaces InkDanceServer (old T
--- Ink Dragon, archived in ServerStorage). Validates the cast, flies the caster (anchored root, same curve the
--- clients use), binds monsters around the painting centre and deals the hits. Clients draw everything.
+-- Ink Dragon, archived in ServerStorage). Validates the cast, plans the v2 dash path on the ground (sent to every
+-- client), moves the caster (anchored root, the same Config.RootCF the clients use), binds monsters around the
+-- painting centre and deals the hits. Clients draw everything. Times: tau = real, story = minus the hit-stops.
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local Run = game:GetService("RunService")
@@ -16,7 +17,8 @@ remote.Name = "InkPaintingRemote"
 remote.Parent = RS
 
 local COOLDOWN = Run:IsStudio() and Config.StudioCooldown or Config.Cooldown
-local DURATION = Config.Duration
+local DURATION = Config.Duration -- real seconds, freezes included
+local St, SH = Config.Strokes, Config.StrokeHit
 local sessions, cooldowns, serial = {}, {}, 0
 
 local function rayParams(ignore)
@@ -78,7 +80,10 @@ local function finish(player, reason)
 	unbind(s)
 	Combat.Clear(player)
 	if s.root.Parent then
-		s.root.CFrame = s.origin
+		-- stay where the ultimate left the caster (the final plant is at the painting centre), standing upright
+		local pos, look = s.root.Position, s.root.CFrame.LookVector
+		look = math.abs(look.Y) < 0.9 and Config.flat(look) or Config.flat(s.origin.LookVector)
+		s.root.CFrame = CFrame.lookAt(pos, pos + look)
 		s.root.Anchored = s.anchored
 	end
 	if s.hum.Parent then
@@ -100,7 +105,7 @@ local function victims(s, radius)
 end
 
 local function bind(s)
-	local stun = os.clock() + (Config.BindUntil - Config.BindFrom) + 0.25
+	local stun = os.clock() + (Config.Tau(Config.BindUntil) - Config.Tau(Config.BindFrom)) + 0.25
 	for _, m in victims(s, Config.Radius) do
 		local mr = m:FindFirstChild("HumanoidRootPart")
 		if mr and not s.bound[m] then
@@ -124,6 +129,38 @@ local function hit(s, h)
 			if away.Magnitude < 0.1 then away = s.origin.LookVector end
 			local power = (m:GetAttribute("Heavy") and 0.15 or 1) * h.knockback
 			mr:ApplyImpulse((away.Unit + Vector3.yAxis * 0.6).Unit * power * mr.AssemblyMass)
+		end
+	end
+end
+
+-- v2 dash strokes: a hit when the brush passes a bound monster, another when the stroke erupts
+local function strokeHits(s, story)
+	for i, st in St do
+		if story >= st.from and not s.passDone[i] then
+			local prog = Config.StrokeProgress(s.plan, i, story)
+			for m in s.bound do
+				local mr = m.Parent and m:FindFirstChild("HumanoidRootPart")
+				if mr and not s.passed[i][m] then
+					local along, side = Config.StrokeProject(s.plan, i, mr.Position)
+					if side <= SH.passWidth and along >= -3 and along <= prog + 1 then
+						s.passed[i][m] = true
+						if Combat.CanHit(s.player, m) then Combat.Damage(s.player, m, SH.pass, "ult", 0) end
+					end
+				end
+			end
+			if story >= st.to then s.passDone[i] = true end
+		end
+		if story >= st.erupt and not s.erupted[i] then
+			s.erupted[i] = true
+			for _, m in victims(s, Config.Radius + 6) do
+				local mr = m:FindFirstChild("HumanoidRootPart")
+				if mr then
+					local along, side = Config.StrokeProject(s.plan, i, mr.Position)
+					if side <= SH.eruptWidth and along >= -4 and along <= s.plan.len[i] + 4 then
+						Combat.Damage(s.player, m, SH.erupt, "ult", 0)
+					end
+				end
+			end
 		end
 	end
 end
@@ -157,10 +194,25 @@ remote.OnServerEvent:Connect(function(player, action, id)
 	local lift = Config.Lift
 	local ceiling = workspace:Raycast(root.Position, Vector3.yAxis * (Config.Lift + 8), rayParams({ char }))
 	if ceiling then lift = math.max(3, ceiling.Distance - 6) end
+	-- the ground under the dash path (players and monsters are not ground)
+	local ignore = {}
+	for _, other in Players:GetPlayers() do
+		if other.Character then table.insert(ignore, other.Character) end
+	end
+	local monsters = workspace:FindFirstChild("Monsters")
+	if monsters then table.insert(ignore, monsters) end
+	local okPlan, plan = pcall(Config.MakePlan, origin, P, hum.HipHeight + root.Size.Y * 0.5, ignore)
+	if not okPlan then
+		warn("[InkPainting] plan: " .. tostring(plan))
+		plan = nil
+	end
+	local wire = plan and { rootH = plan.rootH, land = plan.land, strokes = plan.strokes } or nil
+	Config.PreparePlan(plan)
 	local s = {
 		id = serial, player = player, char = char, hum = hum, root = root, tool = tool, origin = origin, P = P, lift = lift,
 		serverStart = workspace:GetServerTimeNow(), walk = hum.WalkSpeed, jump = hum.JumpPower, jumpHeight = hum.JumpHeight,
-		rotate = hum.AutoRotate, anchored = root.Anchored, bound = {}, hits = {},
+		rotate = hum.AutoRotate, anchored = root.Anchored, bound = {}, hits = {}, plan = plan,
+		passed = { {}, {}, {} }, passDone = {}, erupted = {},
 	}
 	sessions[player] = s
 	cooldowns[player] = now + COOLDOWN
@@ -170,7 +222,7 @@ remote.OnServerEvent:Connect(function(player, action, id)
 	hum.WalkSpeed, hum.JumpPower, hum.JumpHeight, hum.AutoRotate = 0, 0, 0, false
 	root.Anchored = true
 	root.CFrame = origin
-	remote:FireAllClients("Begin", player, s.id, origin, P, lift, s.serverStart, COOLDOWN)
+	remote:FireAllClients("Begin", player, s.id, origin, P, lift, s.serverStart, COOLDOWN, wire)
 end)
 
 Run.Heartbeat:Connect(function()
@@ -178,20 +230,22 @@ Run.Heartbeat:Connect(function()
 		if player.Character ~= s.char or not s.root.Parent or s.hum.Health <= 0 or s.tool.Parent ~= s.char then
 			finish(player, "Interrupted")
 		else
-			local t = workspace:GetServerTimeNow() - s.serverStart
-			s.root.CFrame = s.origin * Config.RootOffset(t, s.lift)
-			if t >= Config.BindFrom and not s.didBind then
+			local tau = workspace:GetServerTimeNow() - s.serverStart
+			local story = Config.Story(math.max(0, tau))
+			s.root.CFrame = Config.RootCF(story, s.origin, s.lift, s.plan)
+			if story >= Config.BindFrom and not s.didBind then
 				s.didBind = true
 				bind(s)
 			end
+			if s.plan then strokeHits(s, story) end
 			for i, h in Config.Hits do
-				if t >= h.t and not s.hits[i] then
+				if story >= h.t and not s.hits[i] then
 					s.hits[i] = true
 					hit(s, h)
 				end
 			end
-			if t >= Config.BindUntil and next(s.bound) then unbind(s) end
-			if t >= DURATION then finish(player, "Complete") end
+			if story >= Config.BindUntil and next(s.bound) then unbind(s) end
+			if tau >= DURATION then finish(player, "Complete") end
 		end
 	end
 end)

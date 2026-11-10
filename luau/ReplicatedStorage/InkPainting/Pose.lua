@@ -1,10 +1,13 @@
 -- InkPainting/Pose (ModuleScript) -> ReplicatedStorage.InkPainting.Pose
--- Caster body + held brush for the T ultimate. Runs on EVERY client for the caster, because joint Transforms do not
+-- Caster body + held brush for the G ultimate. Runs on EVERY client for the caster, because joint Transforms do not
 -- replicate. Pose rows follow InkSkillController: {t, pitch, yaw, roll, dx, dy, dz} in degrees / studs.
 -- Arms: pitch lifts forward/up, yaw sweeps around the body (+ = left), roll = out to the side (+ right arm, - left arm).
 -- Elbows/knees: pitch = bend amount (sign picked per rig). Waist/Neck: pitch + = lean back / look up, yaw + = turn left.
 -- The real brush is hidden and a client-side copy is drawn in the hand so it can grow without touching the tool welds.
+-- v2: KEYS (v1 time) for acts 1, 3, 4; KEYS2 for the act-2 dashes and KEYS3 for the final plant (story time from the
+-- act start). Flips and turns are in the root CFrame (Config.RootCF), not here.
 local Config = require(script.Parent:WaitForChild("Config"))
+local A = Config.Act
 
 local Pose = {}
 
@@ -161,10 +164,101 @@ local function sample(keys, t)
 	return { t, hermite(keys, t, 2), hermite(keys, t, 3), hermite(keys, t, 4), hermite(keys, t, 5), hermite(keys, t, 6), hermite(keys, t, 7) }
 end
 
-local function brushDir(t)
-	local v = Vector3.new(hermite(BRUSH, t, 2), hermite(BRUSH, t, 3), hermite(BRUSH, t, 4))
+local function brushDir(list, t)
+	local v = Vector3.new(hermite(list, t, 2), hermite(list, t, 3), hermite(list, t, 4))
 	return v.Magnitude > 1e-3 and v.Unit or Vector3.new(0, -1, 0)
 end
+
+-- v2 poses: joint -> {pitch, yaw, roll, dx, dy, dz}, brush = {x, y, z} in root space (+z = behind the caster)
+local function v1Pose(t1)
+	local out = {}
+	for name, keys in KEYS do
+		local v = sample(keys, t1)
+		out[name] = { v[2], v[3], v[4], v[5], v[6], v[7] }
+	end
+	out.brush = { hermite(BRUSH, t1, 2), hermite(BRUSH, t1, 3), hermite(BRUSH, t1, 4) }
+	return out
+end
+local POSES = {
+	load = v1Pose(2.6), -- v1 brush overhead before the giant stroke: act 2 starts and ends here
+	fall = v1Pose(Config.V1(A.Fall)), -- v1 pose when the final dive takes over
+	tuck = { -- backflip, knees to the chest, arms out
+		RightShoulder = { 70, 0, 55 }, RightElbow = { 40 }, LeftShoulder = { 70, 0, -55 }, LeftElbow = { 45 },
+		Waist = { -24 }, Neck = { -12 }, RightHip = { 100, 0, 8 }, LeftHip = { 100, 0, -8 }, RightKnee = { 125 },
+		LeftKnee = { 125 }, Root = { 0 }, brush = { 0.85, 0.35, 0.25 },
+	},
+	land = { -- low lunge, left leg forward, brush trailing low behind on the right
+		RightShoulder = { -40, -15, 42 }, RightElbow = { 14 }, LeftShoulder = { 50, 35, -25 }, LeftElbow = { 35 },
+		Waist = { -20, 18, 0 }, Neck = { 16, -14, 0 }, RightHip = { -28, 0, 8 }, LeftHip = { 78, 0, -6 },
+		RightKnee = { 38 }, LeftKnee = { 100 }, Root = { -10, 0, 0, 0, -1.1, 0 }, brush = { 0.5, -0.45, 0.75 },
+	},
+	dash = { -- gliding lunge, the brush tip drags the ink on the ground
+		RightShoulder = { -48, -18, 38 }, RightElbow = { 8 }, LeftShoulder = { 40, 40, -30 }, LeftElbow = { 40 },
+		Waist = { -26, 16, 0 }, Neck = { 20, -14, 0 }, RightHip = { -35, 0, 8 }, LeftHip = { 62, 0, -6 },
+		RightKnee = { 28 }, LeftKnee = { 80 }, Root = { -16, 0, 0, 0, -0.8, 0 }, brush = { 0.42, -0.38, 0.82 },
+	},
+	dashB = { -- the same, a beat later: brush lower, torso twisted further
+		RightShoulder = { -55, -22, 34 }, RightElbow = { 6 }, LeftShoulder = { 46, 44, -26 }, LeftElbow = { 46 },
+		Waist = { -28, 22, 0 }, Neck = { 22, -18, 0 }, RightHip = { -38, 0, 8 }, LeftHip = { 66, 0, -6 },
+		RightKnee = { 26 }, LeftKnee = { 84 }, Root = { -18, 0, 0, 0, -0.85, 0 }, brush = { 0.4, -0.45, 0.8 },
+	},
+	whip = { -- corner: the brush sweeps round in front while the body turns
+		RightShoulder = { 85, 70, 35 }, RightElbow = { 12 }, LeftShoulder = { 30, -10, -70 }, LeftElbow = { 20 },
+		Waist = { -6, 45, 0 }, Neck = { 6, -25, 0 }, RightHip = { 45, 0, 10 }, LeftHip = { 30, 0, -10 },
+		RightKnee = { 75 }, LeftKnee = { 60 }, Root = { -4, 0, 0, 0, -0.3, 0 }, brush = { -0.2, -0.15, -1 },
+	},
+	raise = { -- the dive: brush overhead in both hands
+		RightShoulder = { 172, 0, 6 }, RightElbow = { 18 }, LeftShoulder = { 165, -15, -4 }, LeftElbow = { 30 },
+		Waist = { 14 }, Neck = { 12 }, RightHip = { 25, 0, 6 }, LeftHip = { 40, 0, -6 }, RightKnee = { 50 },
+		LeftKnee = { 70 }, Root = { 6 }, brush = { 0.05, 0.85, 0.5 },
+	},
+	plant = { -- landed on one knee, the brush driven into the painting's centre
+		RightShoulder = { 58, 8, 8 }, RightElbow = { 22 }, LeftShoulder = { 52, -25, -8 }, LeftElbow = { 34 },
+		Waist = { -32 }, Neck = { 28 }, RightHip = { -15, 0, 8 }, LeftHip = { 88, 0, -6 }, RightKnee = { 105 },
+		LeftKnee = { 96 }, Root = { -8, 0, 0, 0, -1.5, 0 }, brush = { 0, -1, -0.3 },
+	},
+	plantDeep = {
+		RightShoulder = { 54, 8, 8 }, RightElbow = { 26 }, LeftShoulder = { 48, -25, -8 }, LeftElbow = { 38 },
+		Waist = { -36 }, Neck = { 30 }, RightHip = { -18, 0, 8 }, LeftHip = { 92, 0, -6 }, RightKnee = { 110 },
+		LeftKnee = { 100 }, Root = { -9, 0, 0, 0, -1.75, 0 }, brush = { 0, -1, -0.28 },
+	},
+	rise = {
+		RightShoulder = { 30, 0, 14 }, RightElbow = { 28 }, LeftShoulder = { 16, 0, -12 }, LeftElbow = { 22 },
+		Waist = { -8 }, Neck = { 4 }, RightHip = { 20, 0, 4 }, LeftHip = { 30, 0, -4 }, RightKnee = { 30 },
+		LeftKnee = { 40 }, Root = { -2, 0, 0, 0, -0.4, 0 }, brush = { 0.2, -0.4, -1 },
+	},
+	rest = {
+		RightShoulder = { 16, 0, 12 }, RightElbow = { 28 }, LeftShoulder = { 14, 0, -12 }, LeftElbow = { 22 },
+		brush = { 0.2, -0.4, -1 },
+	},
+}
+local ZERO = { 0, 0, 0, 0, 0, 0 }
+local function build(timeline)
+	local keys, brush = {}, {}
+	for name in KEYS do keys[name] = {} end
+	for _, row in timeline do
+		local pose = POSES[row[2]]
+		for name, list in keys do
+			local v = pose[name] or ZERO
+			table.insert(list, K(row[1], v[1], v[2], v[3], v[4], v[5], v[6]))
+		end
+		table.insert(brush, { row[1], pose.brush[1], pose.brush[2], pose.brush[3] })
+	end
+	return keys, brush
+end
+-- act 2, from Config.Act.Dive: backflip down, three dashes with a whip at each corner, backflip up
+local KEYS2, BRUSH2 = build({
+	{ 0, "load" }, { 0.2, "tuck" }, { 0.36, "tuck" }, { 0.5, "land" }, { 0.62, "dash" }, { 1.05, "dashB" }, { 1.55, "dash" },
+	{ 1.78, "whip" }, { 1.95, "land" }, { 2.05, "dash" }, { 2.5, "dashB" }, { 3.0, "dash" },
+	{ 3.23, "whip" }, { 3.4, "land" }, { 3.5, "dash" }, { 3.95, "dashB" }, { 4.45, "dash" },
+	{ 4.72, "tuck" }, { 5.0, "load" },
+})
+-- act 5, from Config.Act.Fall: raise the brush, dive, plant it, hold while the painting burns, stand up
+local KEYS3, BRUSH3 = build({
+	{ 0, "fall" }, { 0.22, "raise" }, { 0.42, "raise" }, { 0.5, "plant" }, { 0.6, "plantDeep" }, { 1.55, "plant" },
+	{ 2.0, "rise" }, { 2.3, "rest" },
+})
+Pose.KEYS2, Pose.BRUSH2, Pose.KEYS3, Pose.BRUSH3, Pose.POSES = KEYS2, BRUSH2, KEYS3, BRUSH3, POSES
 
 local function jointWorld(j, w0, transform)
 	if j:IsA("Motor6D") then
@@ -244,12 +338,20 @@ function Pose.Bind(char, tool)
 		copy.Parent = folder
 	end
 
-	-- Returns brush info for the FX: tip, grip point, handle CFrame, direction, scale
-	function self:Update(t, rootCF)
-		local w = math.min(math.clamp(t / 0.15, 0, 1), math.clamp((Config.Duration - t) / 0.25, 0, 1))
+	-- s = story time. Returns brush info for the FX: tip, grip point, handle CFrame, direction, scale
+	function self:Update(s, rootCF)
+		local set, brushSet, t
+		if s >= A.Dive and s < A.Resume then
+			set, brushSet, t = KEYS2, BRUSH2, s - A.Dive
+		elseif s >= A.Fall then
+			set, brushSet, t = KEYS3, BRUSH3, s - A.Fall
+		else
+			set, brushSet, t = KEYS, BRUSH, Config.V1(s)
+		end
+		local w = math.min(math.clamp(s / 0.15, 0, 1), math.clamp((A.End - s) / 0.25, 0, 1))
 		w = w * w * (3 - 2 * w)
 		local transforms = {}
-		for name, keys in KEYS do
+		for name, keys in set do
 			local j = self.joints[name]
 			if j and j.Parent then
 				local v = sample(keys, t)
@@ -276,30 +378,30 @@ function Pose.Bind(char, tool)
 			world = jointWorld(j, world, transforms[name] or j.Transform)
 		end
 		local hand = world or (char:FindFirstChild("RightHand") and char.RightHand.CFrame) or rootCF
-		local s = Config.BrushScale(t)
-		local dir = rootCF:VectorToWorldSpace(brushDir(t))
+		local scale = Config.BrushScale2(s)
+		local dir = rootCF:VectorToWorldSpace(brushDir(brushSet, t))
 		local up = math.abs(dir:Dot(rootCF.UpVector)) > 0.95 and rootCF.LookVector or rootCF.UpVector
 		local grip = (hand * GRIP_C0).Position
 		local rot = CFrame.lookAt(Vector3.zero, -dir, up)
-		local handleCF = CFrame.new(grip) * rot * CFrame.new(0, 0, -GRIP_Z * s)
-		if math.abs(s - self.lastScale) > 1e-3 then
+		local handleCF = CFrame.new(grip) * rot * CFrame.new(0, 0, -GRIP_Z * scale)
+		if math.abs(scale - self.lastScale) > 1e-3 then
 			for _, e in parts do
-				e.p.Size = e.size * s
+				e.p.Size = e.size * scale
 			end
-			self.lastScale = s
+			self.lastScale = scale
 		end
 		local list, cfs = table.create(#parts), table.create(#parts)
 		for i, e in parts do
 			list[i] = e.p
-			cfs[i] = handleCF * (CFrame.new(e.off.Position * s) * e.off.Rotation)
+			cfs[i] = handleCF * (CFrame.new(e.off.Position * scale) * e.off.Rotation)
 		end
 		workspace:BulkMoveTo(list, cfs, Enum.BulkMoveMode.FireCFrameChanged)
 		return {
-			tip = handleCF:PointToWorldSpace(Vector3.new(0, 0, TIP_Z * s)),
+			tip = handleCF:PointToWorldSpace(Vector3.new(0, 0, TIP_Z * scale)),
 			grip = grip,
 			handle = handleCF,
 			dir = dir,
-			scale = s,
+			scale = scale,
 		}
 	end
 

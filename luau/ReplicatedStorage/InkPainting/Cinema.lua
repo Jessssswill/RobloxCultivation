@@ -1,7 +1,9 @@
 -- InkPainting/Cinema (ModuleScript) -> ReplicatedStorage.InkPainting.Cinema
--- Caster-only part of the T ultimate: 8 camera shots, ink-storm skybox, grade (grey ink world -> red hell), screen
--- overlays (rice paper, ink frame, ink flood), letterbox, title and a skip button. Everything is local and restored
--- in Destroy. Player attribute UltCutscene = false skips it (same switch as the sword ultimates).
+-- Caster-only part of the G ultimate: camera shots, ink-storm skybox, grade (grey ink world -> red hell), screen
+-- overlays (rice paper, ink frame, ink flood), letterbox, title card and a skip button. Everything is local and
+-- restored in Destroy. Player attribute UltCutscene = false skips it (same switch as the sword ultimates).
+-- v2: Update(s, tau) takes story time + real time. Rule (will 2026-11-10): every shot shows the caster's own moves,
+-- the technique and the monsters getting hit; hits are felt (shake, flash, lens punch; the freezes are in Config).
 local Players = game:GetService("Players")
 local Lighting = game:GetService("Lighting")
 local StarterGui = game:GetService("StarterGui")
@@ -19,6 +21,7 @@ local Cinema = {}
 local function lin(a, b, x)
 	return math.clamp((x - a) / (b - a), 0, 1)
 end
+local outCubicLocal = Config.outCubic
 
 local function make(class, props, parent)
 	local o = Instance.new(class)
@@ -116,15 +119,31 @@ local function grade(t)
 	return GRADE[n]
 end
 
+local A, St = Config.Act, Config.Strokes
+local function tauV1(t1)
+	return Config.Tau(Config.SAtV1(t1))
+end
+-- {real time, amplitude, decay}
 local SHAKES = {
-	{ T.Impact, 1.0, 9 },
-	{ Config.Hits[2].t, 0.35, 12 },
-	{ Config.Hits[3].t, 0.35, 12 },
-	{ T.Claws, 0.6, 10 },
-	{ T.Claws + 0.14, 0.45, 10 },
-	{ T.Dive, 0.4, 6 },
-	{ T.Final, 1.3, 7 },
+	{ tauV1(T.Impact), 1.0, 9 },
+	{ tauV1(T.Wide), 0.35, 12 },
+	{ tauV1(T.Wide + 0.35), 0.35, 12 },
+	{ tauV1(T.Claws), 0.6, 10 },
+	{ tauV1(T.Claws + 0.14), 0.45, 10 },
+	{ tauV1(T.Dive), 0.4, 6 },
+	{ Config.Tau(A.Final), 1.7, 5 },
 }
+-- {real time, flash strength, decay, colour} and {real time, lens punch in degrees}
+local WHITE, WARM = Color3.new(1, 1, 1), Color3.fromRGB(255, 220, 205)
+local FLASHES = { { tauV1(T.Impact), 0.75, 22, WHITE }, { Config.Tau(A.Final), 0.8, 14, WARM } }
+local PUNCHES = { { tauV1(T.Impact), -5 }, { Config.Tau(A.Final), -10 } }
+for _, st in St do
+	table.insert(SHAKES, { Config.Tau(st.from), 0.3, 12 }) -- push off
+	table.insert(SHAKES, { Config.Tau(st.erupt), 0.95, 8 })
+	table.insert(FLASHES, { Config.Tau(st.erupt), 0.5, 26, WHITE })
+	table.insert(PUNCHES, { Config.Tau(st.erupt), -6 })
+end
+local GOLD = Color3.fromRGB(236, 196, 120)
 
 function Cinema.New(ctx, fx)
 	local player = Players.LocalPlayer
@@ -252,8 +271,20 @@ function Cinema.New(ctx, fx)
 	for _, top in { true, false } do
 		table.insert(bars, make("Frame", { AnchorPoint = Vector2.new(0, top and 1 or 0), Position = UDim2.fromScale(0, top and 0 or 1), Size = UDim2.fromScale(1, 0.075), BackgroundColor3 = Color3.fromRGB(8, 7, 9), BorderSizePixel = 0, ZIndex = 8 }, gui))
 	end
-	local title = make("TextLabel", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.962), Size = UDim2.fromScale(0.8, 0.045), BackgroundTransparency = 1, Text = Config.Title, FontFace = TITLE, TextScaled = true, TextColor3 = Color3.fromRGB(240, 232, 216), TextTransparency = 1, ZIndex = 9 }, gui)
-	make("UITextSizeConstraint", { MaxTextSize = 24 }, title)
+	-- title card while the caster rises: black ink swipe, gold name, red seal (v2, replaces the small bar title)
+	local card = make("Frame", { Name = "TitleCard", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0.05, 0.6), Size = UDim2.fromScale(0.4, 0.2), BackgroundTransparency = 1, ZIndex = 9 }, gui)
+	make("UIAspectRatioConstraint", { AspectRatio = 3.2 }, card)
+	local swipeClip = make("Frame", { Size = UDim2.fromScale(0, 1), BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 9 }, card)
+	local swipe = make("ImageLabel", { Size = UDim2.fromOffset(10, 10), BackgroundTransparency = 1, Image = Tex.stroke, ImageColor3 = Color3.fromRGB(8, 7, 9), ImageTransparency = 0.04, ZIndex = 9 }, swipeClip)
+	local cjk = make("TextLabel", { Position = UDim2.fromScale(0.05, 0.04), Size = UDim2.fromScale(0.58, 0.62), BackgroundTransparency = 1, Text = Config.TitleCJK, Font = Enum.Font.Antique, TextScaled = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = GOLD, TextTransparency = 1, ZIndex = 10 }, card)
+	local cjkStroke = make("UIStroke", { Color = Color3.fromRGB(26, 8, 6), Thickness = 2, Transparency = 1 }, cjk)
+	local cjkScale = make("UIScale", { Scale = 1 }, cjk)
+	local latin = make("TextLabel", { Position = UDim2.fromScale(0.06, 0.68), Size = UDim2.fromScale(0.82, 0.2), BackgroundTransparency = 1, Text = Config.TitleLatin, FontFace = TITLE, TextScaled = true, TextXAlignment = Enum.TextXAlignment.Left, TextColor3 = Color3.fromRGB(242, 230, 204), TextTransparency = 1, ZIndex = 10 }, card)
+	local seal = make("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.74, 0.36), Size = UDim2.fromScale(0.2, 0.55), BackgroundColor3 = Color3.fromRGB(178, 28, 22), BackgroundTransparency = 1, Rotation = -7, ZIndex = 11 }, card)
+	make("UIAspectRatioConstraint", { AspectRatio = 1 }, seal)
+	make("UICorner", { CornerRadius = UDim.new(0.1, 0) }, seal)
+	local sealScale = make("UIScale", { Scale = 1 }, seal)
+	local sealText = make("TextLabel", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "墨", Font = Enum.Font.Antique, TextScaled = true, TextColor3 = Color3.fromRGB(255, 238, 222), TextTransparency = 1, ZIndex = 12 }, seal)
 	local skip = make("TextButton", { Name = "Skip", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -18, 0.962, 0), Size = UDim2.fromOffset(112, 30), BackgroundColor3 = Color3.fromRGB(20, 18, 20), BackgroundTransparency = 0.35, Text = "LEWATI  >>", FontFace = BODY, TextSize = 14, TextColor3 = Color3.fromRGB(230, 222, 210), AutoButtonColor = true, ZIndex = 10 }, gui)
 	make("UICorner", { CornerRadius = UDim.new(0, 6) }, skip)
 	make("UIStroke", { Color = Color3.fromRGB(150, 140, 130), Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, skip)
@@ -286,7 +317,71 @@ function Cinema.New(ctx, fx)
 		return nil
 	end
 
-	local function shot(t)
+	-- v2 shots. The camera works each stroke from the side away from the painting centre, so the bound monsters are
+	-- behind the caster as he passes them (stroke 2 runs through the centre: the caster's start side).
+	local plan = ctx.plan
+	local camSide = {}
+	if plan then
+		for i, pts in plan.strokes do
+			local d = plan.dir[i]
+			local n = d:Cross(UP).Unit
+			local mid = (pts[1] + pts[#pts]) / 2
+			local toP = Vector3.new(P.X - mid.X, 0, P.Z - mid.Z)
+			local away = toP.Magnitude > 4 and -toP.Unit or -f
+			if n:Dot(away) < 0 then n = -n end
+			camSide[i] = n
+		end
+	end
+
+	local function act2Shot(s)
+		local c = casterPos()
+		if s < St[1].from then -- backflip down to stroke 1, seen from beside its start
+			local a, d, n = plan.strokes[1][1], plan.dir[1], camSide[1]
+			local u = ease(lin(A.Dive, St[1].from, s))
+			return a - d * 6 + n * 9 + UP * (3 + 1.5 * (1 - u)), c:Lerp(a + UP * 2, 0.35), 72
+		end
+		for i, st in St do
+			local nextSt = St[i + 1]
+			local d, n = plan.dir[i], camSide[i]
+			if s < st.to then -- dash: tracking beside and a little ahead, the caster big in frame, monsters behind him
+				local u = lin(st.from, st.to, s)
+				return c + d * (8 - 2 * u) + n * 10 + UP * 4.2, c + d * 3 + UP * 0.8, 70
+			elseif (nextSt and s < nextSt.from) or (not nextSt and s < A.Resume) then
+				-- corner: just past the caster, looking back along the stroke as it erupts (the last one: follow him up)
+				local pts = plan.strokes[i]
+				local b, mid = pts[#pts], (pts[1] + pts[#pts]) / 2
+				local u = ease(lin(st.to, nextSt and nextSt.from or A.Resume, s))
+				local look = mid + UP * 1.5
+				if not nextSt then look = look:Lerp(c, ease(lin(st.to + 0.18, A.Resume, s))) end
+				return b + d * 8 + n * 5 + UP * (7 + u), look, 74
+			end
+		end
+		return c - f * 13 + UP * 5, c, 70
+	end
+
+	local function finaleShot(s, t)
+		local c = casterPos()
+		local land = plan.land
+		if s < A.Final then -- the dive, from the ground at the landing: he comes down at the lens with the demons
+			local u = lin(A.Fall, A.Final, s)
+			return land + r * 15 + f * 6 + UP * 1.8, c:Lerp(land + UP * 2, 0.25 * u), 66 - 8 * ease(u)
+		end
+		-- the plant, then a crane up and back until the whole burning painting is in frame
+		local e = outCubicLocal(lin(A.Final + 0.05, A.Restore, s))
+		return (land + f * 12 + r * 9 + UP * 2.5):Lerp(P + f * 52 - r * 14 + UP * 46, e), (land + UP * 1.5):Lerp(P + f * 2, e), 60 + 14 * e
+	end
+
+	local function shot(t, s)
+		if plan and s >= A.Dive and s < A.Resume then return act2Shot(s) end
+		if plan and s >= A.Fall then return finaleShot(s, t) end
+		if t >= T.Black and t < T.Demons then -- 7 (v2) up past the caster at the eye: brush raised to the sky, eye behind
+			local u = ease(lin(T.Black, T.Demons, t))
+			local c = casterPos()
+			return c - f * (10 + 2 * u) + r * 8 - UP * 6, c:Lerp(E, 0.55), 74 + 6 * u
+		elseif t >= T.Demons and t < T.Final then -- 8a (v2) low behind the bound monsters: monsters, caster, demons, eye
+			local u = ease(lin(T.Demons, T.Final, t))
+			return P + f * 22 + r * 6 + UP * 1.6, (P + UP * 2):Lerp(E, 0.3) + UP * 2 * u, 82
+		end
 		if t < T.Rise then -- 1 close-up at eye level, the brush hangs tip-down across the right cheek (ref 0:03.5)
 			local head = headPos()
 			local u = ease(t / T.Rise)
@@ -340,8 +435,10 @@ function Cinema.New(ctx, fx)
 		return a
 	end
 
-	function self:Update(t)
+	function self:Update(s, tau)
 		if self.dead then return end
+		tau = tau or Config.Tau(s)
+		local t = Config.V1(s)
 		-- other scripts (skill endings, freecam) may hand the camera back mid-shot
 		if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
 		-- grade + sky
@@ -405,25 +502,49 @@ function Cinema.New(ctx, fx)
 		local rs = big * rf ^ 1.4
 		redFlood.Size = UDim2.fromOffset(rs, rs)
 		redFlood.ImageTransparency = (rf > 0) and lin(T.Red + 0.1, T.Eye + 0.25, t) or 1
-		local fh = math.max(math.exp(-math.max(0, t - T.Impact) * 22) * (t >= T.Impact and 1 or 0), math.exp(-math.max(0, t - T.Final) * 16) * (t >= T.Final and 1 or 0))
-		flash.BackgroundTransparency = 1 - 0.75 * fh
-		flash.BackgroundColor3 = t >= T.Final and Color3.fromRGB(255, 220, 205) or Color3.new(1, 1, 1)
+		local fh, fcol = 0, WHITE
+		for _, e in FLASHES do
+			if tau >= e[1] then
+				local v = e[2] * math.exp(-(tau - e[1]) * e[3])
+				if v > fh then fh, fcol = v, e[4] end
+			end
+		end
+		flash.BackgroundTransparency = 1 - fh
+		flash.BackgroundColor3 = fcol
 		local barsIn = ease(lin(0, 0.3, t)) * (1 - ease(lin(T.Restore + 0.15, T.End, t)))
 		bars[1].Position = UDim2.fromScale(0, 0.075 * barsIn)
 		bars[2].Position = UDim2.fromScale(0, 1 - 0.075 * barsIn)
-		title.TextTransparency = 1 - math.min(lin(T.Sky + 0.05, T.Sky + 0.35, t), 1 - lin(T.Stroke - 0.2, T.Stroke, t))
+		-- title card (real time; act 1 has no freezes)
+		local out = lin(2.3, 2.6, tau)
+		swipeClip.Size = UDim2.fromScale(outCubicLocal(lin(1.0, 1.28, tau)), 1)
+		swipe.Size = UDim2.fromOffset(card.AbsoluteSize.X, card.AbsoluteSize.Y)
+		swipe.ImageTransparency = 0.04 + 0.96 * out
+		local ca = lin(1.12, 1.38, tau)
+		cjk.TextTransparency = 1 - ca * (1 - out)
+		cjkStroke.Transparency = cjk.TextTransparency
+		cjkScale.Scale = 1 + 0.35 * (1 - outCubicLocal(ca))
+		latin.TextTransparency = 1 - lin(1.3, 1.55, tau) * (1 - out)
+		local sa = lin(1.5, 1.6, tau)
+		seal.BackgroundTransparency = 1 - sa * (1 - out)
+		sealText.TextTransparency = seal.BackgroundTransparency
+		sealScale.Scale = 1 + 0.8 * (1 - outCubicLocal(sa))
+		card.Visible = tau < 2.65
 		skip.Visible = t < T.Restore
 
 		-- camera
-		local pos, look, fov = shot(t)
+		local pos, look, fov = shot(t, s)
 		local leave = ease(lin(T.Restore, T.End, t))
 		-- keep the lens over the terrain grass, terrain pushes the camera in, everything else in the way gets faded below
 		pos = clearTerrain(pos, 3.6)
 		local hitR = workspace:Raycast(look, pos - look, terrainOnly)
 		if hitR and hitR.Distance > 2 then pos = clearTerrain(hitR.Position + hitR.Normal * 0.7, 2.4) end
-		local a = shake(t)
+		local a = shake(tau)
+		if fx.hitPulse then a += 0.28 * math.exp(-math.max(0, s - fx.hitPulse) * 16) end -- each monster the brush passes
+		for _, p in PUNCHES do
+			if tau >= p[1] then fov += p[2] * math.exp(-(tau - p[1]) * 9) end
+		end
 		local cf = CFrame.lookAt(pos, look)
-		cf = cf * CFrame.new(math.sin(t * 97) * 0.35 * a, math.sin(t * 131) * 0.22 * a, 0) * CFrame.Angles(0, 0, math.rad(0.8) * math.sin(t * 89) * a)
+		cf = cf * CFrame.new(math.sin(tau * 97) * 0.35 * a, math.sin(tau * 131) * 0.22 * a, 0) * CFrame.Angles(0, 0, math.rad(0.8) * math.sin(tau * 89) * a)
 		if leave > 0 then
 			local root = char:FindFirstChild("HumanoidRootPart")
 			local delta = root and (root.Position - origin.Position) or Vector3.zero
@@ -438,7 +559,9 @@ function Cinema.New(ctx, fx)
 		local c = casterPos()
 		local seen = {}
 		local targets = { look }
-		if t < T.Painting or (t >= T.Wide and t < T.Black) or t >= T.Restore then table.insert(targets, c + UP * 1.5) end
+		if t < T.Painting or (t >= T.Wide and t < T.Demons) or t >= T.Restore or (plan and ((s >= A.Dive and s < A.Resume) or s >= A.Fall)) then
+			table.insert(targets, c + UP * 1.5)
+		end
 		if fx.phantomTip then
 			table.insert(targets, fx.phantomTip)
 			table.insert(targets, fx.phantomMid)
