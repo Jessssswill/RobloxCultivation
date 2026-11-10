@@ -306,9 +306,11 @@ function Cinema.New(ctx, fx)
 			local u = ease(lin(T.Painting, T.Wide, t))
 			return P + f * 16 + r * 12 + UP * (5 + 2 * u), dragonFocus() or (P + UP * 10), 58
 		elseif t < T.Black then -- 5b low under the canopy, up at the caster against the vortex + dragon, ink floods in
-			-- (at the caster's height the lens sat inside the tree crowns)
+			-- (at the caster's height the lens sat inside the tree crowns). Aim between caster and centre so neither
+			-- leaves the frame, whatever the cast distance.
 			local u = ease(lin(T.Wide, T.Black, t))
-			return ground0 + UP * (3.6 + u) - f * 9 - r * 12, P + UP * 13 + r * 2, 64 - 3 * u
+			local c = casterPos()
+			return ground0 + UP * (3.6 + u) - f * 9 - r * 12, (c + UP) * 0.45 + (P + UP * 9) * 0.55 + r * 2, 68 - 3 * u
 		elseif t < T.Demons then -- 7 up at the sky, the eye opens
 			local u = ease(lin(T.Black, T.Demons, t))
 			return P + f * (30 - 2 * u) - r * 3 + UP * 2.5, E, 72 - 8 * u
@@ -347,8 +349,8 @@ function Cinema.New(ctx, fx)
 		local hit = math.exp(-math.max(0, t - T.Impact) * 14) * (t >= T.Impact and 1 or 0)
 		local fin = math.exp(-math.max(0, t - T.Final) * 10) * (t >= T.Final and 1 or 0)
 		cc.Saturation = g[2]
-		cc.Contrast = g[3] + 0.3 * hit + 0.3 * fin
-		cc.Brightness = g[4] + 0.35 * hit + 0.3 * fin
+		cc.Contrast = g[3] + 0.3 * hit + 0.45 * fin
+		cc.Brightness = g[4] + 0.35 * hit + 0.12 * fin -- more lift washed the red hit out to salmon
 		cc.TintColor = g[5]
 		local inkLight = lin(T.Sky, T.Sky + 0.3, t) * (1 - lin(T.Red - 0.02, T.Red, t))
 		local hellLight = (t >= T.Red and 1 or 0) * (1 - lin(T.Restore, T.End - 0.1, t))

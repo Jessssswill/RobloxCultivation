@@ -295,7 +295,8 @@ function FX.New(ctx)
 	-- 2. launch: ink blooms under the caster
 	local launchBleed = groundCard(folder, "LaunchBleed", Tex.bleed, ground0 + UP * lift0, BLACK)
 	local launchAtt = Instance.new("Attachment")
-	launchAtt.Parent = part(folder, "LaunchSplash", Vector3.one * 0.2, CFrame.new(ground0 + UP * 0.5))
+	-- emitters start above the lifted ground cards, or the opaque cards hide their first frames
+	launchAtt.Parent = part(folder, "LaunchSplash", Vector3.one * 0.2, CFrame.new(ground0 + UP * (lift0 + 0.5)))
 	local splashProps = {
 		Texture = Tex.splat, Color = ColorSequence.new(BLACK), Size = seq({ { 0, 1.2 }, { 0.15, 3.4 }, { 1, 1.6 } }),
 		Transparency = seq({ { 0, 0 }, { 0.7, 0.15 }, { 1, 1 } }), Lifetime = NumberRange.new(0.5, 0.9),
@@ -428,7 +429,7 @@ function FX.New(ctx)
 
 	-- 7. impact at the painting centre
 	local impactAtt = Instance.new("Attachment")
-	impactAtt.Parent = part(folder, "Impact", Vector3.one * 0.2, CFrame.new(P + UP * 1))
+	impactAtt.Parent = part(folder, "Impact", Vector3.one * 0.2, CFrame.new(P + UP * (liftP + 0.8)))
 	local impactSplash = emitter(impactAtt, splashProps)
 	flip2x2(impactSplash)
 	local impactBleed = groundCard(folder, "ImpactBleed", Tex.bleed, P + UP * (liftP + 0.03), BLACK, 1.3)
@@ -439,7 +440,7 @@ function FX.New(ctx)
 	local vortex = {}
 	for i = 1, (tier == 1 and 2 or 3) do
 		local top = part(folder, "VortexTop", Vector3.one * 0.2, CFrame.new(V))
-		local bottom = part(folder, "VortexBottom", Vector3.one * 0.2, CFrame.new(P + UP * 0.5))
+		local bottom = part(folder, "VortexBottom", Vector3.one * 0.2, CFrame.new(P + UP * (liftP + 0.5)))
 		local a0, a1 = Instance.new("Attachment"), Instance.new("Attachment")
 		a0.Parent, a1.Parent = top, bottom
 		local beam = Instance.new("Beam")
@@ -505,7 +506,7 @@ function FX.New(ctx)
 	end
 
 	-- 14. hell fire along the stroke
-	local firePart = part(folder, "StrokeFire", Vector3.new(50, 1, 5), CFrame.fromMatrix(P + UP * 0.8, r, UP))
+	local firePart = part(folder, "StrokeFire", Vector3.new(50, 1, 5), CFrame.fromMatrix(P + UP * (liftP + 0.6), r, UP))
 	local fire = emitter(firePart, {
 		Texture = Tex.fire, Color = FIRE, LightEmission = 1, Size = seq({ { 0, 3 }, { 0.4, 7 }, { 1, 2 } }),
 		Transparency = seq({ { 0, 0.2 }, { 0.7, 0.35 }, { 1, 1 } }), Lifetime = NumberRange.new(0.5, 0.9),
@@ -594,7 +595,8 @@ function FX.New(ctx)
 		tendrilGlow.set(46, glowA > 0 and 1 - 0.75 * glowA * (0.85 + 0.15 * math.sin(t * 30)) or 1)
 		for _, v in fx.victims do
 			local alive = v.m.Parent and v.root.Parent
-			local bind = alive and window(t, Config.BindFrom, 0.25, Config.BindUntil + 0.1, 0.3) or 0
+			-- the look outlives the server bind: monsters stay ink through the final hit (bare, they read as pink boxes)
+			local bind = alive and window(t, Config.BindFrom, 0.25, T.Restore + 0.15, 0.3) or 0
 			v.hl.FillTransparency = 1 - 0.85 * bind -- solid ink: at 0.45 the light monster skin showed through as pink
 			v.hl.OutlineTransparency = 1 - 0.8 * bind
 			v.hl.OutlineColor = t > T.Red and HELL or BLACK
