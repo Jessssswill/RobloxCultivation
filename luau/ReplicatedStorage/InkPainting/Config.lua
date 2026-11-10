@@ -64,8 +64,8 @@ Config.Tex = {
 	eye = "rbxassetid://81584309648879", -- 2x2, closed -> open, pre-coloured
 	claw = "rbxassetid://137069074844889", -- v2: the v1 tears ran off the texture border (straight cut ends in shot 7)
 	demon = "rbxassetid://89773600359935", -- 2x2
-	skySide = { "rbxassetid://102311474683926", "rbxassetid://107888920229869", "rbxassetid://101525768316954", "rbxassetid://75157940830124" },
-	skyUp = "rbxassetid://111565612918466",
+	skySide = { "rbxassetid://134284556896654", "rbxassetid://107888920229869", "rbxassetid://101525768316954", "rbxassetid://75157940830124" },
+	skyUp = "rbxassetid://80706159856716",
 	fire = "rbxassetid://125606840536264", -- already in the place (InkSlash Fire11, 4x4 flipbook)
 	glow = "rbxassetid://243660373", -- already in the place
 }
