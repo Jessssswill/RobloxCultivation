@@ -43,7 +43,7 @@ function Cinema.Prepare()
 	if scan.busy or os.clock() - scan.at < 90 then return end
 	scan.busy = true
 	task.spawn(function()
-		local found, stack, n = {}, {}, 0
+		local found, bills, stack, n = {}, {}, {}, 0
 		for _, c in workspace:GetChildren() do
 			if not (SKIP_ROOTS[c.Name] or c:IsA("Terrain") or c.Name:sub(1, 11) == "InkPainting" or (c:IsA("Model") and Players:GetPlayerFromCharacter(c))) then
 				table.insert(stack, c)
@@ -56,6 +56,8 @@ function Cinema.Prepare()
 				local leafy = sa ~= nil and sa.AlphaMode == Enum.AlphaMode.Transparency
 				local ghost = not inst.CanQuery and inst.Transparency < 1 and inst.Size.Magnitude < 140
 				if ghost or leafy then table.insert(found, { part = inst, sa = leafy and sa or nil, ghost = ghost }) end
+			elseif inst:IsA("BillboardGui") then
+				table.insert(bills, inst)
 			end
 			for _, c in inst:GetChildren() do
 				table.insert(stack, c)
@@ -63,7 +65,7 @@ function Cinema.Prepare()
 			n += 1
 			if n % 1500 == 0 then task.wait() end
 		end
-		scan.list, scan.at, scan.busy = found, os.clock(), false
+		scan.list, scan.bills, scan.at, scan.busy = found, bills, os.clock(), false
 	end)
 end
 
@@ -208,6 +210,12 @@ function Cinema.New(ctx, fx)
 			end
 		end
 	end
+	for _, d in scan.bills or {} do -- signs in the map (Cinema.Prepare's scan): "Elite: Frostfang Alpha" hung mid-frame
+		if d.Parent and d.Enabled then
+			self.tags[d] = true
+			d.Enabled = false
+		end
+	end
 	local prompts = game:GetService("ProximityPromptService")
 	self.prompts = prompts.Enabled
 	prompts.Enabled = false
@@ -242,6 +250,9 @@ function Cinema.New(ctx, fx)
 	local world = make("Folder", { Name = "InkPaintingCinemaWorld" }, workspace)
 	local keyPart = make("Part", { Name = "KeyLight", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false, Transparency = 1, Size = Vector3.one * 0.2 }, world)
 	local key = make("PointLight", { Color = Color3.fromRGB(255, 238, 220), Range = 16, Brightness = 0, Shadows = false }, keyPart)
+	-- act 5: a thin paper-white rim round the painter (side on, in the dark grass, he was a black shape on black)
+	local rim = make("Highlight", { Name = "CasterRim", Adornee = char, FillTransparency = 1, OutlineColor = Color3.fromRGB(236, 230, 216),
+		OutlineTransparency = 1, DepthMode = Enum.HighlightDepthMode.Occluded }, world)
 	local overlap = OverlapParams.new()
 	overlap.FilterType = Enum.RaycastFilterType.Exclude
 	overlap.FilterDescendantsInstances = { char, fx.folder, world }
@@ -394,8 +405,8 @@ function Cinema.New(ctx, fx)
 			local d = Config.flat(pt - sp)
 			local side = d:Cross(UP).Unit
 			if side:Dot(r) < 0 then side = -side end
-			local lo = math.min(fin.groundY, sp.Y - 3)
-			local hi = math.max(fin.b.Y + fin.width * 0.3, sp.Y + 17) -- the stroke's tail, the brush held high (2.1x)
+			local lo = math.min(fin.groundY, sp.Y - 3) - 1.5 -- his feet and the stroke's start sat under the bottom bar
+			local hi = math.max(fin.b.Y + fin.width * 0.3, sp.Y + 15.5) -- the stroke's tail, the brush held high (2.1x)
 			-- behind him: room for the brush as it whips up from behind his back
 			local x0, x1 = math.min((fin.a - pt):Dot(d), (sp - pt):Dot(d)) - 7, (fin.b - pt):Dot(d) + 2
 			local center = Vector3.new(pt.X, (lo + hi) / 2, pt.Z) + d * ((x0 + x1) / 2)
@@ -716,6 +727,8 @@ function Cinema.New(ctx, fx)
 		-- dim in close-ups (white hair and pale skin blow out), full only in the wide shots
 		local near = math.clamp(((cf.Position - c).Magnitude - 5) / 12, 0.15, 1)
 		key.Brightness = 0.7 * near * (1 - lin(T.Restore, T.End, t))
+		local rimOn = plan and math.min(lin(A.Fall, A.Fall + 0.25, s), 1 - lin(A.Restore, A.Restore + 0.3, s)) or 0
+		rim.OutlineTransparency = 1 - 0.65 * rimOn
 	end
 
 	function self:RestoreSky()

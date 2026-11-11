@@ -672,7 +672,8 @@ function FX.New(ctx)
 	end
 
 	-- v2 act 5: the last stroke (Config.MakeFinal), built when the server sends it. A camera-facing ink beam along the
-	-- Bezier, painted from above the caster through the target, a red-hot core that gathers in the beat, and the burst.
+	-- Bezier, painted from in front of the caster up through the target, a red-hot aura that gathers in the beat, and
+	-- the burst.
 	local finalStroke
 	local function revealSeq(p, alpha)
 		if p <= 0 then return NumberSequence.new(1) end
@@ -689,8 +690,9 @@ function FX.New(ctx)
 		-- beam curve: P1 = P0 + axis0 * CurveSize0, P2 = P3 - axis1 * CurveSize1
 		local c0 = (fin.b - fin.a) / 3 + fin.w
 		local c1 = (fin.b - fin.a) / 3 - fin.w
+		local P0, P1, P2, P3 = fin.a, fin.a + c0, fin.b - c1, fin.b
 		local function att(pos, axis)
-			local x = axis.Unit
+			local x = axis.Magnitude > 1e-3 and axis.Unit or Vector3.xAxis
 			local z = x:Cross(UP)
 			z = z.Magnitude > 0.01 and z.Unit or Vector3.xAxis
 			local a = Instance.new("Attachment")
@@ -698,11 +700,16 @@ function FX.New(ctx)
 			a.Parent = holder
 			return a
 		end
-		local a0, a1 = att(fin.a, c0), att(fin.b, c1)
-		local function beam(tex, color, width, emission, z)
+		local a0, a1 = att(P0, c0), att(P3, c1)
+		-- the same curve split in two at the target (de Casteljau at t = 0.5, which is fin.point), for the aura
+		local L1, L2 = (P0 + P1) / 2, (P0 + 2 * P1 + P2) / 4
+		local R1, R2 = (P1 + 2 * P2 + P3) / 4, (P2 + P3) / 2
+		local M = (L2 + R1) / 2
+		local am = att(M, R1 - L2)
+		local function beam(tex, color, width, emission, z, from, to, size0, size1)
 			local b = Instance.new("Beam")
-			b.Attachment0, b.Attachment1 = a0, a1
-			b.CurveSize0, b.CurveSize1 = c0.Magnitude, c1.Magnitude
+			b.Attachment0, b.Attachment1 = from or a0, to or a1
+			b.CurveSize0, b.CurveSize1 = size0 or c0.Magnitude, size1 or c1.Magnitude
 			b.Texture = tex
 			b.TextureMode = Enum.TextureMode.Stretch
 			b.TextureLength = 1
@@ -719,7 +726,12 @@ function FX.New(ctx)
 		end
 		local F = { fin = fin, spots = {} }
 		F.ink = beam(Tex.strokeGround or Tex.stroke, BLACK, fin.width, 0, 0)
-		F.core = beam(Tex.stroke, HELL, fin.width * 0.4, 1, 0.6)
+		-- a red-hot aura behind the ink: black ink alone vanished against the dark red world (Studio test 2026-11-11).
+		-- One soft glow per half, so it is brightest where the stroke shows either side of the target
+		F.halo = {
+			beam(Tex.glow, HELL, fin.width * 1.8, 1, -0.5, a0, am, (L1 - P0).Magnitude, (M - L2).Magnitude),
+			beam(Tex.glow, HELL, fin.width * 1.8, 1, -0.5, am, a1, (R1 - M).Magnitude, (P3 - R2).Magnitude),
+		}
 		for _, tt in { 0.2, 0.5, 0.8 } do
 			local sp = part(folder, "FinalBurst", Vector3.one * (fin.width * 0.35), CFrame.new(Config.FinalAt(fin, tt)))
 			local burst = emitter(sp, {
@@ -766,12 +778,15 @@ function FX.New(ctx)
 		local swell = 1 + 0.4 * outCubic(gone)
 		F.ink.Transparency = revealSeq(p, 0.02 + 0.98 * gone)
 		F.ink.Width0, F.ink.Width1 = fin.width * swell, fin.width * swell
-		-- red heat gathers inside the stroke through the beat, flickering, and flares as it bursts
+		-- the aura comes in with the wet front, gathers heat through the beat (flickering) and flares out as it bursts
 		local heat = window(s, FA.Mark + 0.03, 0.22, FA.Final + 0.2, 0.2)
-		local flicker = 0.82 + 0.18 * math.sin(s * 53)
-		F.core.Transparency = revealSeq(p, 1 - 0.85 * heat * flicker)
-		local cw = fin.width * (0.28 + 0.22 * heat) * swell
-		F.core.Width0, F.core.Width1 = cw, cw
+		local flicker = 0.85 + 0.15 * math.sin(s * 53)
+		local aura = math.clamp((0.45 + 0.45 * heat) * flicker * (1 - gone), 0, 1)
+		local hw = fin.width * (1.6 + 0.4 * heat + 1.2 * outCubic(gone))
+		for i, h in F.halo do
+			h.Transparency = revealSeq(math.clamp(p * 2 - (i - 1), 0, 1), 1 - aura) -- each half follows the wet front
+			h.Width0, h.Width1 = hw, hw
+		end
 		local dripping = s >= FA.Mark and s < FA.Final
 		for _, sp in F.spots do
 			sp.drip.Rate = dripping and 22 * k or 0
