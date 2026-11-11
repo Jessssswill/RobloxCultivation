@@ -531,7 +531,7 @@ function FX.New(ctx)
 	local dashes = {}
 	local hitPart, hitSplash, hitFlash, demonRise, dashPart, dashSpray, trail, trailPart, ringAtt, ring, finalGlow
 	if plan then
-		local W, PX = 16, 16 -- card width (the ink band is about half of it), canvas pixels per stud
+		local W, PX = 22, 12 -- card width (the ink band is about half of it), canvas pixels per stud
 		for i, pts in plan.strokes do
 			local cum, L = plan.cum[i], plan.len[i]
 			local d = { cards = {}, len = L, revealed = 0, passed = {}, erupted = false }
@@ -707,14 +707,14 @@ function FX.New(ctx)
 	local function cueS(name, at, fn)
 		table.insert(cuesS, { name = name, t = at, fn = fn })
 	end
-	local A, St = Config.Act, Config.Strokes
+	local ACT, St = Config.Act, Config.Strokes -- (A is the giant stroke's start point)
 	if plan then
-		cueS("dive", A.Dive, function() playSound(fx, "rise", origin.Position, 0.55) end)
+		cueS("dive", ACT.Dive, function() playSound(fx, "rise", origin.Position, 0.55) end)
 		for i, st in St do
 			cueS("dash" .. i, st.from, function() playSound(fx, "claw", plan.strokes[i][1], 1) end)
 		end
-		cueS("leap", A.Leap, function() playSound(fx, "rise", origin.Position, 0.5) end)
-		cueS("plant", A.Final, function()
+		cueS("leap", ACT.Leap, function() playSound(fx, "rise", origin.Position, 0.5) end)
+		cueS("plant", ACT.Final, function()
 			for _, d in dashes do
 				d.erupt:Emit(math.floor(45 * k))
 				d.fire:Emit(math.floor(30 * k))
@@ -778,6 +778,7 @@ function FX.New(ctx)
 				if s >= st.erupt and not d.erupted then
 					d.erupted = true
 					d.erupt:Emit(math.floor(70 * k))
+					d.fire:Emit(math.floor(26 * k)) -- particles keep their colour in the grey world: a hot accent on the ink
 					if i == #dashes then demonRise:Emit(math.floor(12 * k)) end
 					playSound(fx, "slam", Config.StrokeAt(plan, i, d.len * 0.5), 1.1)
 					for _, v in fx.victims do
@@ -787,7 +788,10 @@ function FX.New(ctx)
 						end
 					end
 				end
-				if d.light then d.light.Brightness = 3.2 * window(t, T.Final, 0.08, T.End, 0.5) end
+				if d.light then
+					local burst = s >= st.erupt and 4.5 * math.exp(-(s - st.erupt) * 4) or 0 -- lights the dark forest floor
+					d.light.Brightness = math.max(burst, 3.2 * window(t, T.Final, 0.08, T.End, 0.5))
+				end
 				d.fire.Rate = (t >= T.Final and t < T.Restore + 0.25) and 14 * k or 0
 			end
 		end
@@ -797,16 +801,16 @@ function FX.New(ctx)
 		end
 		dashSpray.Rate = dashing and 170 * k or 0
 		trailPart.CFrame = fx.rootCF
-		trail.Enabled = s >= A.Dive and s < A.Resume
+		trail.Enabled = s >= ACT.Dive and s < ACT.Resume
 		-- the final flash on the ground
-		local fg = lin(A.Final, A.Final + 0.4, s)
+		local fg = lin(ACT.Final, ACT.Final + 0.4, s)
 		finalGlow.set(10 + 100 * outCubic(fg), fg <= 0 and 1 or (0.15 + 0.85 * fg), HELL)
 	end
 
 	local function updateVictims(s)
 		for _, v in fx.victims do
 			if v.kicks and #v.kicks > 0 then
-				if v.root.Parent and v.root.Anchored and s < A.Final - 0.1 then
+				if v.root.Parent and v.root.Anchored and s < ACT.Final - 0.1 then
 					if not v.base then v.base = v.root.CFrame end
 					local off, live = Vector3.zero, false
 					for _, kk in v.kicks do
@@ -1016,7 +1020,14 @@ function FX.New(ctx)
 			local dive = ease(lin(T.Dive, T.Final, t))
 			local a = appear * (1 - lin(T.Final - 0.03, T.Final + 0.05, t))
 			local s = (0.6 + 0.4 * outCubic(appear)) * (1 + 0.6 * dive)
-			d.card:Set(d.at:Lerp(P + UP * 4, dive), d.size * s, d.size * s, a, 1)
+			local at = d.at:Lerp(P + UP * 4, dive)
+			if plan then
+				-- the v2 finale camera waits at the landing: a demon diving past the lens filled the whole screen
+				local cam = workspace.CurrentCamera
+				local view = 2 * (cam.CFrame.Position - at).Magnitude * math.tan(math.rad(cam.FieldOfView) / 2)
+				a *= math.clamp(1 - (d.size * s / math.max(view, 1) - 0.4) / 0.3, 0, 1)
+			end
+			d.card:Set(at, d.size * s, d.size * s, a, 1)
 		end
 
 		-- fire

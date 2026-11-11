@@ -216,6 +216,26 @@ function Cinema.New(ctx, fx)
 
 	local cc = make("ColorCorrectionEffect", { Name = "InkPaintingGrade" }, camera)
 	self.cc = cc
+	-- terrain grass blades are drawn after the colour grade (like see-through leaves), so they stayed green in the
+	-- grey ink world: grey their material colour along with the grade (this client only) and put it back at the end
+	local terrain = workspace.Terrain
+	self.grass = {}
+	for _, m in { Enum.Material.Grass, Enum.Material.LeafyGrass } do
+		local ok, c0 = pcall(terrain.GetMaterialColor, terrain, m)
+		if ok then self.grass[m] = { c0 = c0 } end
+	end
+	local GRASS_INK = Color3.new(0.345, 0.36, 0.32) -- a touch green: the map's lilac ambient tints the blades
+	local function gradeGrass(k, tint)
+		for m, g in self.grass do
+			local c = g.c0:Lerp(GRASS_INK, k)
+			c = Color3.new(c.R * tint.R, c.G * tint.G, c.B * tint.B)
+			local cur = g.cur
+			if not cur or math.abs(cur.R - c.R) + math.abs(cur.G - c.G) + math.abs(cur.B - c.B) > 0.015 then
+				g.cur = c
+				pcall(terrain.SetMaterialColor, terrain, m, c)
+			end
+		end
+	end
 	self.expo0 = Lighting.ExposureCompensation -- the ink world is pale paper, not the dark forest floor
 	-- soft key light that follows the caster on the camera side (forest shade would hide the face otherwise)
 	local world = make("Folder", { Name = "InkPaintingCinemaWorld" }, workspace)
@@ -232,7 +252,7 @@ function Cinema.New(ctx, fx)
 		if p.Parent then
 			local d = (p.Position - P).Magnitude
 			if e.ghost and p.Anchored and d - p.Size.Magnitude * 0.5 < 90 then
-				local half = p.Size * 0.35
+				local half = p.Size * (p.Size.Magnitude < 25 and 0.46 or 0.35) -- bushes fill their box, fir crowns do not
 				table.insert(ghosts, {
 					part = p, cf = p.CFrame, center = p.Position, size = p.Size, half = half, radius = half.Magnitude,
 					lens = p.Size.Magnitude < 125, reach = p.Size.Magnitude * 0.5 + 4.5,
@@ -338,22 +358,27 @@ function Cinema.New(ctx, fx)
 		if s < St[1].from then -- backflip down to stroke 1, seen from beside its start
 			local a, d, n = plan.strokes[1][1], plan.dir[1], camSide[1]
 			local u = ease(lin(A.Dive, St[1].from, s))
-			return a - d * 6 + n * 9 + UP * (3 + 1.5 * (1 - u)), c:Lerp(a + UP * 2, 0.35), 72
+			return a - d * 11 + n * 14 + UP * (3.5 + 1.5 * (1 - u)), c:Lerp(a + UP * 2, 0.35), 70
 		end
 		for i, st in St do
 			local nextSt = St[i + 1]
 			local d, n = plan.dir[i], camSide[i]
-			if s < st.to then -- dash: tracking beside and a little ahead, the caster big in frame, monsters behind him
+			if s < st.to then -- dash: tracking beside him and above, so the wet stroke trails out behind the brush
 				local u = lin(st.from, st.to, s)
-				return c + d * (8 - 2 * u) + n * 10 + UP * 4.2, c + d * 3 + UP * 0.8, 70
+				return c + d * (2.5 - 1.5 * u) + n * 12 + UP * 7, c + d * 3.5 - UP * 0.6, 70
 			elseif (nextSt and s < nextSt.from) or (not nextSt and s < A.Resume) then
 				-- corner: just past the caster, looking back along the stroke as it erupts (the last one: follow him up)
 				local pts = plan.strokes[i]
 				local b, mid = pts[#pts], (pts[1] + pts[#pts]) / 2
 				local u = ease(lin(st.to, nextSt and nextSt.from or A.Resume, s))
 				local look = mid + UP * 1.5
-				if not nextSt then look = look:Lerp(c, ease(lin(st.to + 0.18, A.Resume, s))) end
-				return b + d * 8 + n * 5 + UP * (7 + u), look, 74
+				if not nextSt then
+					look = look:Lerp(c, ease(lin(st.to + 0.18, A.Resume, s)))
+					return b + d * 8 + n * 5 + UP * (7 + u), look, 74
+				end
+				-- pull back on his side of the stroke, looking across it towards the clearing: the stroke erupts between
+				-- him and the monsters (beyond the corner the camera stood in the forest and the trees filled the frame)
+				return b - d * (5 + 2 * u) + n * 14 + UP * (9 + u), b:Lerp(mid, 0.3) + UP, 74
 			end
 		end
 		return c - f * 13 + UP * 5, c, 70
@@ -366,9 +391,10 @@ function Cinema.New(ctx, fx)
 			local u = lin(A.Fall, A.Final, s)
 			return land + r * 15 + f * 6 + UP * 1.8, c:Lerp(land + UP * 2, 0.25 * u), 66 - 8 * ease(u)
 		end
-		-- the plant, then a crane up and back until the whole burning painting is in frame
+		-- the plant, then a crane straight up over the clearing until the whole burning Z of strokes is in frame
+		-- (craning back put the lens inside the forest crowns and the frame went black)
 		local e = outCubicLocal(lin(A.Final + 0.05, A.Restore, s))
-		return (land + f * 12 + r * 9 + UP * 2.5):Lerp(P + f * 52 - r * 14 + UP * 46, e), (land + UP * 1.5):Lerp(P + f * 2, e), 60 + 14 * e
+		return (land + f * 12 + r * 9 + UP * 2.5):Lerp(P - f * 8 + r * 3 + UP * 48, e), (land + UP * 1.5):Lerp(P + f, e), 60 + 12 * e
 	end
 
 	local function shot(t, s)
@@ -377,7 +403,7 @@ function Cinema.New(ctx, fx)
 		if t >= T.Black and t < T.Demons then -- 7 (v2) up past the caster at the eye: brush raised to the sky, eye behind
 			local u = ease(lin(T.Black, T.Demons, t))
 			local c = casterPos()
-			return c - f * (10 + 2 * u) + r * 8 - UP * 6, c:Lerp(E, 0.55), 74 + 6 * u
+			return c - f * (11 + 2 * u) + r * 8 - UP * 4, c:Lerp(E, 0.27), 76 + 6 * u
 		elseif t >= T.Demons and t < T.Final then -- 8a (v2) low behind the bound monsters: monsters, caster, demons, eye
 			local u = ease(lin(T.Demons, T.Final, t))
 			return P + f * 22 + r * 6 + UP * 1.6, (P + UP * 2):Lerp(E, 0.3) + UP * 2 * u, 82
@@ -449,6 +475,7 @@ function Cinema.New(ctx, fx)
 		cc.Contrast = g[3] + 0.3 * hit + 0.45 * fin
 		cc.Brightness = g[4] + 0.35 * hit + 0.12 * fin -- more lift washed the red hit out to salmon
 		cc.TintColor = g[5]
+		gradeGrass(math.clamp(-g[2], 0, 1), g[5])
 		local inkLight = lin(T.Sky, T.Sky + 0.3, t) * (1 - lin(T.Red - 0.02, T.Red, t))
 		local hellLight = (t >= T.Red and 1 or 0) * (1 - lin(T.Restore, T.End - 0.1, t))
 		Lighting.ExposureCompensation = self.expo0 + 0.7 * inkLight + 0.2 * hellLight
@@ -559,8 +586,13 @@ function Cinema.New(ctx, fx)
 		local c = casterPos()
 		local seen = {}
 		local targets = { look }
-		if t < T.Painting or (t >= T.Wide and t < T.Demons) or t >= T.Restore or (plan and ((s >= A.Dive and s < A.Resume) or s >= A.Fall)) then
+		if t < T.Painting or (t >= T.Wide and t < T.Demons) or t >= T.Restore or (plan and ((s >= A.Dive and s < A.Resume) or s >= A.Fall or (t >= T.Black and t < T.Final))) then
 			table.insert(targets, c + UP * 1.5)
+		end
+		if plan and ((s >= A.Dive and s < A.Resume) or s >= A.Fall) then
+			-- his whole body in the v2 action shots: bushes hid everything below the chest
+			table.insert(targets, c)
+			table.insert(targets, c - UP * 1.8)
 		end
 		if fx.phantomTip then
 			table.insert(targets, fx.phantomTip)
@@ -679,6 +711,10 @@ function Cinema.New(ctx, fx)
 			if sa.Parent then sa.Color = c0 end
 		end
 		self.tinted = {}
+		for m, g in self.grass do
+			pcall(workspace.Terrain.SetMaterialColor, workspace.Terrain, m, g.c0)
+		end
+		self.grass = {}
 		for d in self.tags do
 			if d.Parent then d.Enabled = true end
 		end
