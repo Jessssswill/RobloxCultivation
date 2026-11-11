@@ -57,9 +57,9 @@ local function pickTarget(char, root)
 	if best then
 		local flat = Vector3.new(best.Position.X - root.Position.X, 0, best.Position.Z - root.Position.Z)
 		if flat.Magnitude < 8 then
-			return groundAt(root.Position + look * 8, ignore)
+			return groundAt(root.Position + look * 8, ignore), best.Parent
 		end
-		return groundAt(best.Position, ignore)
+		return groundAt(best.Position, ignore), best.Parent
 	end
 	return groundAt(root.Position + look * Config.TargetDistance, ignore)
 end
@@ -115,9 +115,27 @@ local function bind(s)
 			m:SetAttribute("StunUntil", math.max(m:GetAttribute("StunUntil") or 0, stun))
 		end
 	end
+	-- the last stroke (Config.MakeFinal) runs through the main target when it is bound (anchored from now to the
+	-- burst, so it holds still under the stroke), else through the painting's centre
+	if s.plan then
+		local ignore = {}
+		for _, other in Players:GetPlayers() do
+			if other.Character then table.insert(ignore, other.Character) end
+		end
+		local monsters = workspace:FindFirstChild("Monsters")
+		if monsters then table.insert(ignore, monsters) end
+		local main = s.target and s.bound[s.target] and s.target or nil
+		local ok, fin = pcall(Config.MakeFinal, s.plan, s.origin, s.P, main, ignore)
+		if ok and fin then
+			s.plan.final, s.main = fin, main
+			remote:FireAllClients("Final", s.player, s.id, fin)
+		elseif not ok then
+			warn("[InkPainting] final: " .. tostring(fin))
+		end
+	end
 end
 
--- Monsters stay alive (on a sliver of health) until the final plant, so every later shot still has them to hit:
+-- Monsters stay alive (on a sliver of health) until the final burst, so every later shot still has them to hit:
 -- the first live test killed 3 of 4 wolves during the dashes. A hit that would kill is owed and paid with the final.
 local function deal(s, m, amount, final)
 	local h = m:FindFirstChildOfClass("Humanoid")
@@ -207,7 +225,7 @@ remote.OnServerEvent:Connect(function(player, action, id)
 		return
 	end
 	serial += 1
-	local P = pickTarget(char, root)
+	local P, target = pickTarget(char, root)
 	local flat = Vector3.new(P.X - root.Position.X, 0, P.Z - root.Position.Z)
 	local origin = flat.Magnitude > 1 and CFrame.lookAt(root.Position, root.Position + flat.Unit) or root.CFrame
 	-- lower the flight under a ceiling
@@ -232,7 +250,7 @@ remote.OnServerEvent:Connect(function(player, action, id)
 		id = serial, player = player, char = char, hum = hum, root = root, tool = tool, origin = origin, P = P, lift = lift,
 		serverStart = workspace:GetServerTimeNow(), walk = hum.WalkSpeed, jump = hum.JumpPower, jumpHeight = hum.JumpHeight,
 		rotate = hum.AutoRotate, anchored = root.Anchored, bound = {}, hits = {}, plan = plan,
-		passed = { {}, {}, {} }, passDone = {}, erupted = {}, owed = {},
+		passed = { {}, {}, {} }, passDone = {}, erupted = {}, owed = {}, target = target,
 	}
 	sessions[player] = s
 	cooldowns[player] = now + COOLDOWN
@@ -258,6 +276,10 @@ Run.Heartbeat:Connect(function()
 				bind(s)
 			end
 			if s.plan then strokeHits(s, story) end
+			if s.main and story >= Config.Act.Mark and not s.markHit then -- the last stroke goes through the main target
+				s.markHit = true
+				if s.main.Parent and Combat.CanHit(s.player, s.main) then deal(s, s.main, Config.FinalDamage) end
+			end
 			for i, h in Config.Hits do
 				if story >= h.t and not s.hits[i] then
 					s.hits[i] = true

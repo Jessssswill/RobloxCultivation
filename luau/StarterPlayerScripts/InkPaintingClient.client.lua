@@ -81,7 +81,7 @@ local function begin(caster, id, origin, P, lift, serverStart, cooldown, plan)
 		if ok and typeof(v) == "number" then tier = v end
 	end
 	if tier <= 0 then return end -- too far away to draw
-	local s = { id = id, char = char, tool = t, connections = {} }
+	local s = { id = id, char = char, tool = t, connections = {}, plan = plan }
 	active[caster] = s
 	local function elapsed()
 		return workspace:GetServerTimeNow() - serverStart
@@ -154,6 +154,13 @@ remote.OnClientEvent:Connect(function(action, ...)
 	elseif action == "End" then
 		local caster, id = ...
 		finish(caster, id, false)
+	elseif action == "Final" then -- the last stroke, once the server has bound the main target (Config.MakeFinal)
+		local caster, id, fin = ...
+		local s = active[caster]
+		if s and s.id == id and s.plan and typeof(fin) == "table" and typeof(fin.point) == "Vector3" and typeof(fin.root) == "CFrame"
+			and typeof(fin.a) == "Vector3" and typeof(fin.b) == "Vector3" and typeof(fin.w) == "Vector3" and typeof(fin.width) == "number" then
+			s.plan.final = fin
+		end
 	elseif action == "Denied" then
 		pending = false
 		if not active[player] then clearFlags() end

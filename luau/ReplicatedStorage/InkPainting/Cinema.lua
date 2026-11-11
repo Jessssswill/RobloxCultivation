@@ -131,12 +131,13 @@ local SHAKES = {
 	{ tauV1(T.Claws), 0.6, 10 },
 	{ tauV1(T.Claws + 0.14), 0.45, 10 },
 	{ tauV1(T.Dive), 0.4, 6 },
+	{ Config.Tau(A.Mark), 1.1, 7 }, -- the last stroke goes through the target
 	{ Config.Tau(A.Final), 1.7, 5 },
 }
 -- {real time, flash strength, decay, colour} and {real time, lens punch in degrees}
 local WHITE, WARM = Color3.new(1, 1, 1), Color3.fromRGB(255, 220, 205)
-local FLASHES = { { tauV1(T.Impact), 0.75, 22, WHITE }, { Config.Tau(A.Final), 0.8, 14, WARM } }
-local PUNCHES = { { tauV1(T.Impact), -5 }, { Config.Tau(A.Final), -10 } }
+local FLASHES = { { tauV1(T.Impact), 0.75, 22, WHITE }, { Config.Tau(A.Mark), 0.5, 20, WHITE }, { Config.Tau(A.Final), 0.8, 14, WARM } }
+local PUNCHES = { { tauV1(T.Impact), -5 }, { Config.Tau(A.Mark), -5 }, { Config.Tau(A.Final), -10 } }
 for _, st in St do
 	table.insert(SHAKES, { Config.Tau(st.from), 0.3, 12 }) -- push off
 	table.insert(SHAKES, { Config.Tau(st.erupt), 0.95, 8 })
@@ -387,6 +388,39 @@ function Cinema.New(ctx, fx)
 	local function finaleShot(s, t)
 		local c = casterPos()
 		local land = plan.land
+		local fin = plan.final
+		if fin then -- the last stroke, side on: the caster on one side, the target on the other, the whole stroke across
+			local sp, pt = fin.root.Position, fin.point
+			local d = Config.flat(pt - sp)
+			local side = d:Cross(UP).Unit
+			if side:Dot(r) < 0 then side = -side end
+			local lo = math.min(fin.groundY, sp.Y - 3)
+			local hi = math.max(fin.b.Y + fin.width * 0.3, sp.Y + 17) -- the stroke's tail, the brush held high (2.1x)
+			-- behind him: room for the brush as it whips up from behind his back
+			local x0, x1 = math.min((fin.a - pt):Dot(d), (sp - pt):Dot(d)) - 7, (fin.b - pt):Dot(d) + 2
+			local center = Vector3.new(pt.X, (lo + hi) / 2, pt.Z) + d * ((x0 + x1) / 2)
+			local vp = camera.ViewportSize
+			local aspect = math.max(vp.X / math.max(vp.Y, 1), 1)
+			local fov = 58
+			local tv = math.tan(math.rad(fov / 2))
+			local dist = math.max((x1 - x0) / 2 / (tv * aspect), (hi - lo) / 2 / (tv * 0.85)) + 2 -- 0.85: the letterbox bars
+			if s < A.Stroke then -- the dive: low beside the spot, he drops out of the sky onto the target, and the
+				-- frame settles into the stroke shot as he lands (it used to jump at the landing)
+				local u = lin(A.Fall, A.Stroke, s)
+				local k = ease(lin(0.55, 1, u))
+				local pos = (center + side * dist * 0.95 - UP * ((hi - lo) * 0.2)):Lerp(center + side * dist - UP, k)
+				return pos, pt:Lerp(c, 0.45):Lerp(center + UP * 0.5, k), 64 - 6 * ease(u)
+			end
+			-- the stroke and the beat: still, then a slow push-in while the heat gathers; the lens dips to the target
+			-- with the punch as it bursts (aimed at the middle of the stroke, the punch pushed him and the target under
+			-- the bottom bar); after it the crane straight up over the clearing until the whole burning painting is in frame
+			local push = ease(lin(A.Mark, A.Final, s))
+			local dip = ease(lin(A.Final - 0.06, A.Final, s)) * (1 - ease(lin(A.Final + 0.05, A.Final + 0.35, s)))
+			local hold = center + side * dist * (1 - 0.1 * push) - d * (1.5 * push) - UP
+			local aim = (center + UP * 0.5 - d * (1.5 * push)):Lerp(pt + UP * 1.5, 0.8 * dip)
+			local e = outCubicLocal(lin(A.Final + 0.2, A.Restore + 0.25, s))
+			return hold:Lerp(P - f * 8 + r * 3 + UP * 48, e), aim:Lerp(P + f, e), (fov - 3 * push) + (72 - fov + 3 * push) * e
+		end
 		if s < A.Final then -- the dive, from the ground at the landing: he comes down at the lens with the demons
 			local u = lin(A.Fall, A.Final, s)
 			return land + r * 15 + f * 6 + UP * 1.8, c:Lerp(land + UP * 2, 0.25 * u), 66 - 8 * ease(u)
@@ -467,6 +501,13 @@ function Cinema.New(ctx, fx)
 		local t = Config.V1(s)
 		-- other scripts (skill endings, freecam) may hand the camera back mid-shot
 		if camera.CameraType ~= Enum.CameraType.Scriptable then camera.CameraType = Enum.CameraType.Scriptable end
+		-- HUD scripts re-enable their screens mid-cutscene (the elite banner showed over the painting): keep them off
+		for _, g in pg:GetChildren() do
+			if g:IsA("ScreenGui") and g.Enabled and g ~= gui and g.Name ~= "InkPaintingSky" and g.Name ~= "InkPaintingCinema" then
+				self.hidden[g] = true
+				g.Enabled = false
+			end
+		end
 		-- grade + sky
 		local g = grade(t)
 		local hit = math.exp(-math.max(0, t - T.Impact) * 14) * (t >= T.Impact and 1 or 0)
@@ -593,6 +634,12 @@ function Cinema.New(ctx, fx)
 			-- his whole body in the v2 action shots: bushes hid everything below the chest
 			table.insert(targets, c)
 			table.insert(targets, c - UP * 1.8)
+		end
+		local last = plan and plan.final
+		if last and s >= A.Stroke and s < A.Final + 0.3 then -- and the whole last stroke
+			table.insert(targets, Config.FinalAt(last, 0.2))
+			table.insert(targets, last.point)
+			table.insert(targets, Config.FinalAt(last, 0.8))
 		end
 		if fx.phantomTip then
 			table.insert(targets, fx.phantomTip)

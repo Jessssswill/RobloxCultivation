@@ -4,8 +4,9 @@
 -- Arms: pitch lifts forward/up, yaw sweeps around the body (+ = left), roll = out to the side (+ right arm, - left arm).
 -- Elbows/knees: pitch = bend amount (sign picked per rig). Waist/Neck: pitch + = lean back / look up, yaw + = turn left.
 -- The real brush is hidden and a client-side copy is drawn in the hand so it can grow without touching the tool welds.
--- v2: KEYS (v1 time) for acts 1, 3, 4; KEYS2 for the act-2 dashes and KEYS3 for the final plant (story time from the
--- act start). Flips and turns are in the root CFrame (Config.RootCF), not here.
+-- v2: KEYS (v1 time) for acts 1, 3, 4; KEYS2 for the act-2 dashes and KEYS5 for the last stroke (KEYS3: the old final
+-- plant, only when no last stroke came from the server), story time from the act start. Flips and turns are in the root
+-- CFrame (Config.RootCF), not here.
 local Config = require(script.Parent:WaitForChild("Config"))
 local A = Config.Act
 
@@ -222,6 +223,47 @@ local POSES = {
 		Waist = { -36 }, Neck = { 30 }, RightHip = { -18, 0, 8 }, LeftHip = { 92, 0, -6 }, RightKnee = { 110 },
 		LeftKnee = { 100 }, Root = { -9, 0, 0, 0, -1.75, 0 }, brush = { 0, -1, -0.28 },
 	},
+	-- the last stroke (will 2026-11-11: a painter, not a swordsman). The left hand rests on the small of the back the whole
+	-- time, like a calligrapher. He comes down with the brush trailing behind and, as he lands, whips it up over his head
+	-- and forward in one flourish while the giant stroke rises through the target; holds it high through the beat, snaps
+	-- the ink off as the stroke bursts and stands with the brush upright before his face, as at the start. Once he is
+	-- down the brush stays above his shoulders: pointed ahead it reached into the target (read as a stab), swung low it
+	-- went into the ground, swung past his right side it came straight at the side-on camera.
+	dive = {
+		RightShoulder = { -30, -10, 35 }, RightElbow = { 15 }, LeftShoulder = { -38, 20, -18 }, LeftElbow = { 100 },
+		Waist = { -18, -20, 0 }, Neck = { 10, 18, 0 }, RightHip = { 20, 0, 8 }, LeftHip = { 55, 0, -8 }, RightKnee = { 60 },
+		LeftKnee = { 80 }, Root = { 0 }, brush = { 0.25, -0.55, 0.8 }, -- pitched into the dive: trails level behind him
+	},
+	brace = { -- landed in a crouch, the brush whipped up behind the head
+		RightShoulder = { 120, -10, 30 }, RightElbow = { 50 }, LeftShoulder = { -38, 20, -18 }, LeftElbow = { 100 },
+		Waist = { -10, -30, 0 }, Neck = { 4, 26, 0 }, RightHip = { -25, 0, 8 }, LeftHip = { 55, 0, -6 }, RightKnee = { 25 },
+		LeftKnee = { 75 }, Root = { -6, 0, 0, 0, -1.1, 0 }, brush = { 0.2, 0.8, 0.55 },
+	},
+	sweep = { -- the top of the flourish: the brush straight up over him
+		RightShoulder = { 165, 0, 20 }, RightElbow = { 20 }, LeftShoulder = { -38, 20, -18 }, LeftElbow = { 100 },
+		Waist = { -14, 0, 0 }, Neck = { 6, 2, 0 }, RightHip = { -28, 0, 8 }, LeftHip = { 60, 0, -6 }, RightKnee = { 26 },
+		LeftKnee = { 80 }, Root = { -8, 0, 0, 0, -1.15, 0 }, brush = { 0.15, 1, 0.05 },
+	},
+	follow = { -- flung up and forward: the stroke is through
+		RightShoulder = { 150, 10, 20 }, RightElbow = { 8 }, LeftShoulder = { -38, 20, -18 }, LeftElbow = { 100 },
+		Waist = { 10, 15, 0 }, Neck = { 18, -10, 0 }, RightHip = { -15, 0, 8 }, LeftHip = { 35, 0, -6 }, RightKnee = { 10 },
+		LeftKnee = { 40 }, Root = { 4, 0, 0, 0, -0.4, 0 }, brush = { 0.15, 0.85, -0.5 },
+	},
+	followHold = {
+		RightShoulder = { 146, 12, 20 }, RightElbow = { 10 }, LeftShoulder = { -38, 20, -18 }, LeftElbow = { 100 },
+		Waist = { 8, 16, 0 }, Neck = { 16, -11, 0 }, RightHip = { -16, 0, 8 }, LeftHip = { 37, 0, -6 }, RightKnee = { 11 },
+		LeftKnee = { 42 }, Root = { 3, 0, 0, 0, -0.42, 0 }, brush = { 0.12, 0.88, -0.46 },
+	},
+	flick = { -- the wrist snaps the ink off the brush: the stroke bursts
+		RightShoulder = { 95, -10, 30 }, RightElbow = { 50 }, LeftShoulder = { -38, 20, -18 }, LeftElbow = { 100 },
+		Waist = { -4, 4, 0 }, Neck = { 6, 0, 0 }, RightHip = { -12, 0, 6 }, LeftHip = { 30, 0, -6 }, RightKnee = { 10 },
+		LeftKnee = { 34 }, Root = { 0, 0, 0, 0, -0.35, 0 }, brush = { 0.2, 0.95, 0.25 },
+	},
+	flickHold = { -- composed: the brush upright before the face while the painting burns
+		RightShoulder = { 38, 6, 4 }, RightElbow = { 62 }, LeftShoulder = { -38, 20, -18 }, LeftElbow = { 100 },
+		Waist = { -2, 4, 0 }, Neck = { 2, 0, 0 }, RightHip = { -6, 0, 6 }, LeftHip = { 20, 0, -6 }, RightKnee = { 8 },
+		LeftKnee = { 25 }, Root = { 0, 0, 0, 0, -0.2, 0 }, brush = { 0, 1, -0.12 },
+	},
 	rise = {
 		RightShoulder = { 30, 0, 14 }, RightElbow = { 28 }, LeftShoulder = { 16, 0, -12 }, LeftElbow = { 22 },
 		Waist = { -8 }, Neck = { 4 }, RightHip = { 20, 0, 4 }, LeftHip = { 30, 0, -4 }, RightKnee = { 30 },
@@ -253,12 +295,38 @@ local KEYS2, BRUSH2 = build({
 	{ 3.23, "whip" }, { 3.4, "land" }, { 3.5, "dash" }, { 3.95, "dashB" }, { 4.45, "dash" },
 	{ 4.72, "tuck" }, { 5.0, "load" },
 })
--- act 5, from Config.Act.Fall: raise the brush, dive, plant it, hold while the painting burns, stand up
+-- act 5 without a last stroke (old server): raise the brush, dive, plant it at the burst, hold, stand up
 local KEYS3, BRUSH3 = build({
-	{ 0, "fall" }, { 0.22, "raise" }, { 0.42, "raise" }, { 0.5, "plant" }, { 0.6, "plantDeep" }, { 1.55, "plant" },
-	{ 2.0, "rise" }, { 2.3, "rest" },
+	{ 0, "fall" }, { 0.22, "raise" }, { 0.75, "raise" }, { 0.85, "plant" }, { 0.95, "plantDeep" }, { 1.85, "plant" },
+	{ 2.15, "rise" }, { 2.45, "rest" },
 })
-Pose.KEYS2, Pose.BRUSH2, Pose.KEYS3, Pose.BRUSH3, Pose.POSES = KEYS2, BRUSH2, KEYS3, BRUSH3, POSES
+-- act 5, from Config.Act.Fall (Stroke +0.34, Mark +0.5, Final +0.85, Restore +1.85, End +2.45): dive with the brush
+-- trailing, whip it up and over as he lands, hold through the beat, flick the ink off as it bursts, stand while it burns
+local FINAL_ROWS = {
+	{ 0, "fall" }, { 0.16, "dive" }, { 0.27, "dive" }, { 0.34, "brace" }, { 0.4, "sweep" }, { 0.47, "follow" },
+	{ 0.8, "followHold" }, { 0.86, "flick" }, { 0.98, "flickHold" }, { 1.75, "flickHold" }, { 2.1, "rise" }, { 2.45, "rest" },
+}
+local KEYS5, BRUSH5 = build(FINAL_ROWS)
+-- the same in mid-air (the dragon): knees drawn up, no stance, until he has floated down
+local AIR_LEGS = { -- left hip, left knee, right hip, right knee
+	brace = { 50, 85, 40, 70 }, sweep = { 58, 90, 45, 75 }, follow = { 40, 70, 20, 50 }, followHold = { 42, 72, 22, 52 },
+	flick = { 40, 70, 24, 56 }, flickHold = { 36, 64, 22, 50 },
+}
+for name, legs in AIR_LEGS do
+	local base = POSES[name]
+	local air = table.clone(base)
+	air.RightHip, air.LeftHip = { legs[3], 0, 8 }, { legs[1], 0, -8 }
+	air.RightKnee, air.LeftKnee = { legs[4] }, { legs[2] }
+	air.Root = { (base.Root and base.Root[1]) or 0 }
+	POSES[name .. "Air"] = air
+end
+local AIR_ROWS = {}
+for i, row in FINAL_ROWS do
+	local air = POSES[row[2] .. "Air"] and row[2] .. "Air" or row[2]
+	AIR_ROWS[i] = { row[1], air }
+end
+local KEYS5A, BRUSH5A = build(AIR_ROWS)
+Pose.KEYS2, Pose.BRUSH2, Pose.KEYS3, Pose.BRUSH3, Pose.KEYS5, Pose.BRUSH5, Pose.POSES = KEYS2, BRUSH2, KEYS3, BRUSH3, KEYS5, BRUSH5, POSES
 
 local function jointWorld(j, w0, transform)
 	if j:IsA("Motor6D") then
@@ -344,7 +412,14 @@ function Pose.Bind(char, tool)
 		if s >= A.Dive and s < A.Resume then
 			set, brushSet, t = KEYS2, BRUSH2, s - A.Dive
 		elseif s >= A.Fall then
-			set, brushSet, t = KEYS3, BRUSH3, s - A.Fall
+			local fin = self.final
+			if fin and fin.air then
+				set, brushSet, t = KEYS5A, BRUSH5A, s - A.Fall
+			elseif fin then
+				set, brushSet, t = KEYS5, BRUSH5, s - A.Fall
+			else
+				set, brushSet, t = KEYS3, BRUSH3, s - A.Fall
+			end
 		else
 			set, brushSet, t = KEYS, BRUSH, Config.V1(s)
 		end
@@ -380,8 +455,8 @@ function Pose.Bind(char, tool)
 		local hand = world or (char:FindFirstChild("RightHand") and char.RightHand.CFrame) or rootCF
 		local scale = Config.BrushScale2(s)
 		local dir = rootCF:VectorToWorldSpace(brushDir(brushSet, t))
-		local up = math.abs(dir:Dot(rootCF.UpVector)) > 0.95 and rootCF.LookVector or rootCF.UpVector
 		local grip = (hand * GRIP_C0).Position
+		local up = math.abs(dir:Dot(rootCF.UpVector)) > 0.95 and rootCF.LookVector or rootCF.UpVector
 		local rot = CFrame.lookAt(Vector3.zero, -dir, up)
 		local handleCF = CFrame.new(grip) * rot * CFrame.new(0, 0, -GRIP_Z * scale)
 		if math.abs(scale - self.lastScale) > 1e-3 then

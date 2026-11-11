@@ -14,6 +14,7 @@ local ease, outCubic = Config.ease, Config.outCubic
 local UP = Vector3.yAxis
 local BLACK = Color3.fromRGB(10, 9, 12)
 local DARK_RED = Color3.fromRGB(70, 6, 8)
+local PAPER = Color3.fromRGB(236, 230, 216) -- the main target under the last stroke: blank paper with the ink across it
 local HELL = Color3.fromRGB(255, 58, 34)
 local FIRE = ColorSequence.new({
 	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 214, 140)),
@@ -529,7 +530,7 @@ function FX.New(ctx)
 	-- the caster leaves it; v2 act 5: every stroke explodes around the planted brush
 	local plan = ctx.plan
 	local dashes = {}
-	local hitPart, hitSplash, hitFlash, demonRise, dashPart, dashSpray, trail, trailPart, ringAtt, ring, finalGlow
+	local hitPart, hitSplash, hitFlash, demonRise, dashPart, dashSpray, trail, trailPart, ringAtt, ring, finalGlow, ringPart
 	if plan then
 		local W, PX = 22, 12 -- card width (the ink band is about half of it), canvas pixels per stud
 		for i, pts in plan.strokes do
@@ -657,7 +658,7 @@ function FX.New(ctx)
 		trail.Enabled = false
 		trail.Parent = trailPart
 		-- the final: an ink shockwave ring round the planted brush + a red flash on the ground
-		local ringPart = part(folder, "FinalRing", Vector3.one * 0.2, CFrame.new(plan.land + UP * 1.4))
+		ringPart = part(folder, "FinalRing", Vector3.one * 0.2, CFrame.new(plan.land + UP * 1.4))
 		ringAtt = Instance.new("Attachment")
 		ringAtt.Parent = ringPart
 		ring = emitter(ringAtt, {
@@ -668,6 +669,113 @@ function FX.New(ctx)
 		})
 		flip2x2(ring)
 		finalGlow = groundCard(folder, "FinalGlow", Tex.glow, plan.land + UP * 0.25, HELL)
+	end
+
+	-- v2 act 5: the last stroke (Config.MakeFinal), built when the server sends it. A camera-facing ink beam along the
+	-- Bezier, painted from above the caster through the target, a red-hot core that gathers in the beat, and the burst.
+	local finalStroke
+	local function revealSeq(p, alpha)
+		if p <= 0 then return NumberSequence.new(1) end
+		if p >= 1 then return NumberSequence.new(alpha) end
+		local pa = math.clamp(p - 0.035, 0.001, 0.996)
+		local pb = math.clamp(p, pa + 0.002, 0.999)
+		return NumberSequence.new({
+			NumberSequenceKeypoint.new(0, alpha), NumberSequenceKeypoint.new(pa, alpha),
+			NumberSequenceKeypoint.new(pb, 1), NumberSequenceKeypoint.new(1, 1),
+		})
+	end
+	local function buildFinal(fin)
+		local holder = part(folder, "FinalStroke", Vector3.one * 0.2, CFrame.new(fin.point))
+		-- beam curve: P1 = P0 + axis0 * CurveSize0, P2 = P3 - axis1 * CurveSize1
+		local c0 = (fin.b - fin.a) / 3 + fin.w
+		local c1 = (fin.b - fin.a) / 3 - fin.w
+		local function att(pos, axis)
+			local x = axis.Unit
+			local z = x:Cross(UP)
+			z = z.Magnitude > 0.01 and z.Unit or Vector3.xAxis
+			local a = Instance.new("Attachment")
+			a.CFrame = CFrame.fromMatrix(pos - fin.point, x, z:Cross(x))
+			a.Parent = holder
+			return a
+		end
+		local a0, a1 = att(fin.a, c0), att(fin.b, c1)
+		local function beam(tex, color, width, emission, z)
+			local b = Instance.new("Beam")
+			b.Attachment0, b.Attachment1 = a0, a1
+			b.CurveSize0, b.CurveSize1 = c0.Magnitude, c1.Magnitude
+			b.Texture = tex
+			b.TextureMode = Enum.TextureMode.Stretch
+			b.TextureLength = 1
+			b.Color = ColorSequence.new(color)
+			b.LightInfluence = 0
+			b.LightEmission = emission
+			b.Width0, b.Width1 = width, width
+			b.FaceCamera = true
+			b.Segments = tier == 1 and 16 or 30
+			b.ZOffset = z
+			b.Transparency = NumberSequence.new(1)
+			b.Parent = holder
+			return b
+		end
+		local F = { fin = fin, spots = {} }
+		F.ink = beam(Tex.strokeGround or Tex.stroke, BLACK, fin.width, 0, 0)
+		F.core = beam(Tex.stroke, HELL, fin.width * 0.4, 1, 0.6)
+		for _, tt in { 0.2, 0.5, 0.8 } do
+			local sp = part(folder, "FinalBurst", Vector3.one * (fin.width * 0.35), CFrame.new(Config.FinalAt(fin, tt)))
+			local burst = emitter(sp, {
+				Texture = Tex.splat, Color = ColorSequence.new(BLACK), Size = seq({ { 0, 1.6 }, { 0.15, 4 }, { 1, 1.2 } }),
+				Transparency = seq({ { 0, 0 }, { 0.75, 0.15 }, { 1, 1 } }), Lifetime = NumberRange.new(0.5, 0.9),
+				Speed = NumberRange.new(26, 58), SpreadAngle = Vector2.new(180, 180), Acceleration = Vector3.new(0, -70, 0),
+				Drag = 1.2, Rotation = NumberRange.new(-180, 180), RotSpeed = NumberRange.new(-140, 140),
+				Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+			flip2x2(burst)
+			local drip = emitter(sp, { -- wet ink running off the stroke during the beat
+				Texture = Tex.splat, Color = ColorSequence.new(BLACK), Size = seq({ { 0, 0.5 }, { 0.3, 1 }, { 1, 0.4 } }),
+				Squash = seq({ { 0, 0.8 }, { 1, 1.6 } }), Transparency = seq({ { 0, 0.05 }, { 1, 0.6 } }),
+				Lifetime = NumberRange.new(0.6, 0.9), Speed = NumberRange.new(0, 2), Acceleration = Vector3.new(0, -45, 0),
+				Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+			flip2x2(drip)
+			local hot = emitter(sp, {
+				Texture = Tex.fire, Color = FIRE, LightEmission = 1, Size = seq({ { 0, 3 }, { 0.4, 7 }, { 1, 2 } }),
+				Transparency = seq({ { 0, 0.15 }, { 0.7, 0.35 }, { 1, 1 } }), Lifetime = NumberRange.new(0.45, 0.8),
+				Speed = NumberRange.new(10, 24), SpreadAngle = Vector2.new(180, 180), Rotation = NumberRange.new(-20, 20),
+				Shape = Enum.ParticleEmitterShape.Box, ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume,
+			})
+			hot.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4
+			hot.FlipbookMode = Enum.ParticleFlipbookMode.OneShot
+			table.insert(F.spots, { part = sp, burst = burst, drip = drip, hot = hot })
+		end
+		-- the shockwave and the red ground flash move under the target
+		local under = Vector3.new(fin.point.X, fin.floor or fin.groundY, fin.point.Z)
+		ringPart.CFrame = CFrame.new(fin.point)
+		if finalGlow then finalGlow.part:Destroy() end
+		finalGlow = groundCard(folder, "FinalGlow", Tex.glow, under + UP * 0.25, HELL)
+		finalStroke = F
+	end
+
+	local FA = Config.Act -- (ACT is declared further down)
+	local function updateFinal(s)
+		local F = finalStroke
+		if not F then return end
+		local fin = F.fin
+		-- the wet front runs from above the caster, through the target and out beyond it, ahead of the brush
+		local p = outCubic(lin(FA.Stroke + 0.03, FA.Mark, s))
+		local gone = lin(FA.Final, FA.Final + 0.2, s) -- it bursts: thrown apart in a fifth of a second
+		local swell = 1 + 0.4 * outCubic(gone)
+		F.ink.Transparency = revealSeq(p, 0.02 + 0.98 * gone)
+		F.ink.Width0, F.ink.Width1 = fin.width * swell, fin.width * swell
+		-- red heat gathers inside the stroke through the beat, flickering, and flares as it bursts
+		local heat = window(s, FA.Mark + 0.03, 0.22, FA.Final + 0.2, 0.2)
+		local flicker = 0.82 + 0.18 * math.sin(s * 53)
+		F.core.Transparency = revealSeq(p, 1 - 0.85 * heat * flicker)
+		local cw = fin.width * (0.28 + 0.22 * heat) * swell
+		F.core.Width0, F.core.Width1 = cw, cw
+		local dripping = s >= FA.Mark and s < FA.Final
+		for _, sp in F.spots do
+			sp.drip.Rate = dripping and 22 * k or 0
+		end
 	end
 
 	-- cues that fire once
@@ -714,18 +822,52 @@ function FX.New(ctx)
 			cueS("dash" .. i, st.from, function() playSound(fx, "claw", plan.strokes[i][1], 1) end)
 		end
 		cueS("leap", ACT.Leap, function() playSound(fx, "rise", origin.Position, 0.5) end)
-		cueS("plant", ACT.Final, function()
+		cueS("stroke", ACT.Stroke, function()
+			if plan.final then playSound(fx, "claw", plan.final.point, 1.3) end
+		end)
+		cueS("mark", ACT.Mark, function() -- the stroke is through: the target flashes and turns to blank paper
+			local fin = plan.final
+			if not fin then return end
+			hitPart.CFrame = CFrame.new(fin.point)
+			hitSplash:Emit(math.floor(36 * k))
+			hitFlash:Emit(2)
+			for _, v in fx.victims do
+				if fin.model and v.m == fin.model then
+					v.paper = true
+					v.flash = fx.s
+				end
+			end
+			playSound(fx, "slam", fin.point, 0.8)
+		end)
+		cueS("plant", ACT.Final, function() -- the last stroke bursts (or the brush is planted): every stroke explodes
 			for _, d in dashes do
 				d.erupt:Emit(math.floor(45 * k))
 				d.fire:Emit(math.floor(30 * k))
+			end
+			local fin = plan.final
+			if finalStroke then
+				for _, sp in finalStroke.spots do
+					sp.burst:Emit(math.floor(34 * k))
+					sp.hot:Emit(math.floor(10 * k))
+				end
+				hitPart.CFrame = CFrame.new(fin.point)
+				hitSplash:Emit(math.floor(45 * k))
+				hitFlash:Emit(2)
+			end
+			for _, v in fx.victims do
+				if v.paper then -- back to ink with a white flash as it is blown away
+					v.paper = false
+					v.flash = fx.s
+				end
 			end
 			local n = tier == 1 and 16 or 28
 			for i = 1, n do
 				ringAtt.CFrame = CFrame.Angles(0, (i + math.random()) * math.pi * 2 / n, 0)
 				ring:Emit(tier == 1 and 2 or 3)
 			end
-			playSound(fx, "slam", plan.land, 1.3)
-			playSound(fx, "thunder", plan.land, 0.8)
+			local at = fin and fin.point or plan.land
+			playSound(fx, "slam", at, 1.3)
+			playSound(fx, "thunder", at, 0.8)
 		end)
 	end
 
@@ -842,7 +984,7 @@ function FX.New(ctx)
 			end
 			if v.flash then
 				local fa = math.clamp((s - v.flash) / 0.14, 0, 1)
-				v.hl.FillColor = Color3.new(1, 1, 1):Lerp(BLACK, fa)
+				v.hl.FillColor = Color3.new(1, 1, 1):Lerp(v.paper and PAPER or BLACK, fa)
 				if fa >= 1 then v.flash = nil end
 			end
 		end
@@ -852,6 +994,15 @@ function FX.New(ctx)
 	function fx:Update(s, rootCF, tau)
 		local t = Config.V1(s)
 		fx.s, fx.rootCF = s, rootCF
+		-- the last stroke arrives from the server once the target is bound
+		if plan and plan.final and finalStroke == nil then
+			local ok, err = pcall(buildFinal, plan.final)
+			if not ok then
+				warn("[InkPainting] final stroke: " .. tostring(err))
+				finalStroke = false
+			end
+		end
+		pose.final = plan and plan.final
 		local info = pose:Update(s, rootCF)
 		fx.tip = info.tip
 		for _, c in fx.cues do
@@ -899,8 +1050,8 @@ function FX.New(ctx)
 			local alive = v.m.Parent and v.root.Parent
 			-- the look outlives the server bind: monsters stay ink through the final hit (bare, they read as pink boxes)
 			local bind = alive and window(t, Config.BindFrom, 0.25, T.Restore + 0.15, 0.3) or 0
-			v.hl.FillTransparency = 1 - 0.85 * bind -- solid ink: at 0.45 the light monster skin showed through as pink
-			v.hl.OutlineTransparency = 1 - 0.8 * bind
+			v.hl.FillTransparency = v.paper and 0.04 or (1 - 0.85 * bind) -- solid ink: at 0.45 the light monster skin showed through as pink
+			v.hl.OutlineTransparency = v.paper and 0 or (1 - 0.8 * bind)
 			v.hl.OutlineColor = t > T.Red and HELL or BLACK
 			local climb = outCubic(lin(Config.BindFrom, Config.BindFrom + 0.45, t))
 			for _, b in v.beams do
@@ -1037,6 +1188,7 @@ function FX.New(ctx)
 
 		if plan then
 			local ok, err = pcall(updateDashes, s, t, info)
+			if ok then ok, err = pcall(updateFinal, s) end
 			if not ok and not fx.warned then
 				fx.warned = true
 				warn("[InkPainting] dashes: " .. tostring(err))

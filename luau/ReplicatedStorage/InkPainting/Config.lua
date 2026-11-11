@@ -4,7 +4,8 @@
 -- v2 (2026-11-10, will: "kayak sailor piece", longer, wider, the caster's own moves on screen, every hit felt): about 15 s
 -- in 5 acts. 1 rise + bind (v1), 2 the caster backflips down and dashes a giant Z of three ink strokes through the
 -- monsters (each stroke erupts), 3 giant stroke + dragon + red hell (v1), 4 eye, claws, demons (v1, slower), 5 the caster
--- dives from the sky and plants the brush: every stroke explodes.
+-- dives from the sky and paints one last giant stroke through the main target: it hangs for a beat, then bursts and every
+-- stroke explodes (2026-11-11, will: a brush paints, it never stabs).
 -- Shared by server + clients. Three clocks:
 --   tau = real seconds since the cast started (server clock), what the server and clients measure;
 --   s   = story time = tau minus the hit-stop freezes (Config.Story), what everything is authored in;
@@ -26,7 +27,7 @@ Config.TargetDistance = 16 -- otherwise paint this far ahead
 Config.Radius = 50 -- monsters inside this radius are bound by the ink (v1: 28)
 Config.Lift = 15 -- how high the caster rises (lower under a ceiling)
 Config.BindFrom = 1.95 -- story time
-Config.BindUntil = 12.62
+Config.BindUntil = 12.97 -- just past the burst: the main target holds still under the last stroke
 
 -- v1 shot boundaries in v1 time (see shot plan): 1 raise, 2 rise, 3 tendrils, 4 stroke, 5 painting, 6 flood, 7 eye,
 -- 8 demons
@@ -57,9 +58,11 @@ Config.Act = {
 	Leap = 7.1, -- third stroke done: backflip up into the storm again
 	Resume = 7.6, -- act 3: the v1 giant stroke goes on from v1 time 2.6
 	Fall = 12.1, -- act 5: dive from the sky
-	Final = 12.6, -- brush planted in the painting's centre: everything explodes
-	Restore = 13.8,
-	End = 14.4,
+	Stroke = 12.44, -- down in front of the main target: one sweep of the brush paints the last stroke through it
+	Mark = 12.6, -- the stroke is through: the target turns to blank paper, the stroke hangs for a beat
+	Final = 12.95, -- the stroke bursts, every stroke on the ground explodes
+	Restore = 13.95,
+	End = 14.55,
 }
 -- the three dashes (story time); each stroke erupts right after the caster leaves it
 Config.Strokes = {
@@ -71,6 +74,12 @@ Config.Strokes = {
 Config.Path = { { -34, -11 }, { 34, -11 }, { -34, 11 }, { 34, 11 } }
 Config.PathSamples = 9 -- ground samples per stroke (the caster runs on the ink, over the grass)
 Config.Landing = -2.5 -- the final plant, studs in front of P (towards the caster's start)
+-- The final blow (2026-11-11). will first picked a stab into the main target's chest, then: a brush is for painting,
+-- stabbing is for swords, and picked "Coretan terakhir nembus musuh" on the decision card. The caster comes down in front
+-- of the main target's face and one giant ink stroke runs through its body, hangs for a beat and bursts. A tall target
+-- (the dragon) gets it in mid-air at its head; with no bound target the stroke runs through the painting's centre.
+Config.FinalGap = 4.5 -- the target's front -> the caster's root, studs
+Config.FinalDamage = 40 -- the stroke itself, main target only (the burst is the last Config.Hits entry)
 
 -- v1 time for each story time (piecewise linear)
 local V1 = {
@@ -78,9 +87,9 @@ local V1 = {
 	{ 7.6, 2.6 }, -- act 2: the dashes, v1 waits (tendrils grown, monsters bound)
 	{ 10.15, 5.15 }, -- act 3: giant stroke, dragon, flood, red hell
 	{ 12.1, 6.42 }, -- act 4: eye, claws, demons, slower than v1
-	{ 12.6, 6.55 }, -- the dive, slow motion into the final hit
-	{ 13.8, 6.9 }, -- the painting burns
-	{ 14.4, 7.5 }, -- back to the game
+	{ 12.95, 6.55 }, -- the dive and the last stroke, slow motion into the burst (the demons dive into it)
+	{ 13.95, 6.9 }, -- the painting burns
+	{ 14.55, 7.5 }, -- back to the game
 }
 function Config.V1(s)
 	if s <= 0 then return 0 end
@@ -106,7 +115,8 @@ Config.HitStops = {
 	{ s = 5.75, d = 0.07 }, -- stroke 2
 	{ s = 7.2, d = 0.07 }, -- stroke 3
 	{ s = 7.96, d = 0.09 }, -- giant stroke slam (v1 2.96)
-	{ s = 12.6, d = 0.16 }, -- the final
+	{ s = 12.6, d = 0.1 }, -- the last stroke goes through the target
+	{ s = 12.95, d = 0.16 }, -- it bursts
 }
 do
 	local acc = 0
@@ -137,7 +147,7 @@ Config.Hits = {
 	{ t = 7.96, damage = 40, radius = 30 }, -- giant stroke (v1 2.96)
 	{ t = 8.85, damage = 12, radius = 22 }, -- ink vortex (v1 3.85)
 	{ t = 9.2, damage = 12, radius = 22 },
-	{ t = 12.6, damage = 110, radius = 50, knockback = 95 }, -- hundred demons + planted brush
+	{ t = 12.95, damage = 110, radius = 50, knockback = 95 }, -- the last stroke bursts with the hundred demons
 }
 -- dash strokes: a light hit when the brush passes a monster, a heavier one when the stroke erupts
 Config.StrokeHit = { pass = 10, passWidth = 13, erupt = 14, eruptWidth = 15 }
@@ -290,6 +300,79 @@ function Config.MakePlan(origin, P, rootH, ignore)
 	return { rootH = rootH, land = Config.Surface(P + f * Config.Landing, P.Y, ignore), strokes = strokes }
 end
 
+local function groundBelow(pos, ignore)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	rp.FilterDescendantsInstances = ignore
+	local hit = workspace:Raycast(pos + UP * 2, -UP * 80, rp)
+	return hit and hit.Position.Y or pos.Y - 3
+end
+
+-- Server, at the bind (bound monsters stay anchored until the burst): where the caster paints the last stroke and the
+-- stroke itself, sent to every client in "Final". target = the main target's model, or nil (the painting's centre).
+-- The stroke rises like the calligraphy "ti" stroke: a Bezier from a (low, just in front of the caster) through `point`
+-- (the target's body) to b (high beyond it), control points a + (b - a) / 3 + w and b - (b - a) / 3 + w, so it passes
+-- the point halfway (Config.FinalAt). The caster sweeps the brush up from low behind: it never points at the target.
+function Config.MakeFinal(plan, origin, P, target, ignore)
+	local tr = target and target:FindFirstChild("HumanoidRootPart")
+	local point, fwd, ahead, behind, height, floor
+	if tr then
+		fwd = flat(tr.CFrame.LookVector) -- the caster comes down in front of its face
+		floor = groundBelow(tr.Position, ignore)
+		local top = tr.Position.Y + tr.Size.Y * 0.5
+		ahead, behind = tr.Size.Z * 0.5, tr.Size.Z * 0.5
+		local n = 0
+		for _, p in target:GetDescendants() do
+			-- visible parts near the root (the wolves' root is their body). Skinned meshes (the dragon) report their
+			-- bind pose far away from where they are drawn: the distance test leaves them out.
+			if p:IsA("BasePart") and p.Transparency < 0.9 and (p.Position - tr.Position).Magnitude < 40 then
+				n += 1
+				local cf, hs = p.CFrame, p.Size * 0.5
+				local ef = math.abs(cf.RightVector:Dot(fwd)) * hs.X + math.abs(cf.UpVector:Dot(fwd)) * hs.Y + math.abs(cf.LookVector:Dot(fwd)) * hs.Z
+				local eu = math.abs(cf.RightVector.Y) * hs.X + math.abs(cf.UpVector.Y) * hs.Y + math.abs(cf.LookVector.Y) * hs.Z
+				local along = (p.Position - tr.Position):Dot(fwd)
+				ahead = math.max(ahead, along + ef)
+				behind = math.max(behind, ef - along)
+				top = math.max(top, p.Position.Y + eu)
+			end
+		end
+		height = math.max(top - floor, 3)
+		local rise = 0.5
+		if n == 0 then -- nothing visible near the root (the skinned dragon): guess from how high the root stands
+			height = math.max((tr.Position.Y - floor) * 2 + 2, 6)
+			ahead, behind, rise = height * 0.3, height * 0.6, 0.62 -- the dragon's root is at its jaw: aim at the head
+		end
+		point = tr.Position + UP * math.clamp(floor + height * rise - tr.Position.Y, -1, 4)
+	else
+		fwd = -flat(origin.LookVector)
+		floor = groundBelow(P + UP, ignore)
+		height, ahead, behind = 8, 2, 2
+		point = Vector3.new(P.X, floor + 3.5, P.Z)
+	end
+	local d = -fwd -- the caster faces the target
+	local spot = point - d * (ahead + Config.FinalGap)
+	local ground = Config.Surface(spot, plan.land.Y, ignore)
+	local stand = ground.Y + plan.rootH
+	local air = point.Y > stand + 4 -- a tall target: painted in mid-air at its head
+	local at = Vector3.new(spot.X, air and point.Y - 1.2 or stand, spot.Z)
+	local a = Vector3.new(at.X, air and at.Y - 2 or ground.Y + 3.4, at.Z) + d * 2.5 -- over the grass (ground.Y is its top)
+	local b = point + d * (math.min(behind, height * 0.9) + 7) + UP * (height * 0.55 + 5)
+	local L = (b - a).Magnitude
+	return {
+		point = point, root = CFrame.lookAt(at, at + d), groundY = ground.Y, floor = floor, air = air, height = height,
+		a = a, b = b, w = (point - (a + b) / 2) * (4 / 3), width = math.clamp(L * 0.3 * math.clamp(height / 9, 1, 1.5), 8, 16),
+		model = target,
+	}
+end
+
+-- point on the last stroke, t = 0 (above the caster) .. 1 (beyond the target)
+function Config.FinalAt(fin, t)
+	local a, b, w = fin.a, fin.b, fin.w
+	local p1, p2 = a + (b - a) / 3 + w, b - (b - a) / 3 + w
+	local u = 1 - t
+	return a * (u * u * u) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + b * (t * t * t)
+end
+
 -- lengths + directions, on the server and on every client (not sent)
 function Config.PreparePlan(plan)
 	if not plan or plan.cum then return plan end
@@ -372,21 +455,30 @@ function Config.RootCF(s, origin, lift, plan)
 		end
 		return CFrame.new(pos) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0)
 	end
-	if plan and s >= A.Fall then -- act 5: hang in the sky, then drop like a meteor onto the centre
+	if plan and s >= A.Fall then -- act 5: hang in the sky, then drop like a meteor in front of the target (or the centre)
 		local from = origin * Config.RootOffset(Config.V1(A.Fall), lift)
-		local land = plan.land + UP * plan.rootH
-		local yaw = yawOf(origin.LookVector)
-		if s >= A.Final then return CFrame.new(land) * CFrame.Angles(0, yaw, 0) end
-		local u = (s - A.Fall) / (A.Final - A.Fall)
+		local fin = plan.final
+		local land = fin and fin.root.Position or plan.land + UP * plan.rootH
+		local yaw0 = yawOf(origin.LookVector)
+		local yaw = fin and yawOf(fin.root.LookVector) or yaw0
+		local arrive = fin and A.Stroke or A.Final -- no last stroke (old server): the brush is planted at the burst
+		if s >= arrive then
+			if fin and fin.air and s > A.Final + 0.3 then -- painted in mid-air: float down once the stroke has burst
+				local u = ease((s - A.Final - 0.3) / (A.Restore - A.Final))
+				return CFrame.new(land:Lerp(Vector3.new(land.X, fin.groundY + plan.rootH, land.Z), u)) * CFrame.Angles(0, yaw, 0)
+			end
+			return CFrame.new(land) * CFrame.Angles(0, yaw, 0)
+		end
+		local u = (s - A.Fall) / (arrive - A.Fall)
 		local pos = from.Position:Lerp(land, u ^ 3) + UP * 2.5 * math.sin(math.pi * math.min(1, u / 0.5)) * (1 - u)
 		local pitch = -0.75 * ease(u / 0.55) * (1 - ease((u - 0.8) / 0.2))
-		return CFrame.new(pos) * CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0)
+		return CFrame.new(pos) * CFrame.Angles(0, lerpAngle(yaw0, yaw, ease(u / 0.6)), 0) * CFrame.Angles(pitch, 0, 0)
 	end
 	return origin * Config.RootOffset(Config.V1(s), lift)
 end
 
 -- held brush size in story time: v1 sizes, a little shorter for the dashes (the tip drags on the ground), huge for
--- the final plant
+-- the last stroke
 function Config.BrushScale2(s)
 	local A = Config.Act
 	if s < A.Dive then return Config.BrushScale(s) end
@@ -395,7 +487,7 @@ function Config.BrushScale2(s)
 		return 1.6 - 0.35 * k
 	end
 	if s < A.Fall then return Config.BrushScale(Config.V1(s)) end
-	local big = 1.6 + 0.5 * ease((s - A.Fall) / 0.45)
+	local big = 1.6 + (2.1 - 1.6) * ease((s - A.Fall) / 0.3)
 	return big + (1 - big) * ease((s - A.Restore) / 0.5)
 end
 
