@@ -117,11 +117,31 @@ local function bind(s)
 	end
 end
 
+-- Monsters stay alive (on a sliver of health) until the final plant, so every later shot still has them to hit:
+-- the first live test killed 3 of 4 wolves during the dashes. A hit that would kill is owed and paid with the final.
+local function deal(s, m, amount, final)
+	local h = m:FindFirstChildOfClass("Humanoid")
+	if not h or h.Health <= 0 then return end
+	if final then
+		amount += s.owed[m] or 0
+		s.owed[m] = nil
+	elseif h.Health - amount * (s.mult or 1.5) < math.max(2, h.MaxHealth * 0.04) then
+		s.owed[m] = (s.owed[m] or 0) + amount
+		return
+	end
+	local before = h.Health
+	Combat.Damage(s.player, m, amount, "ult", 0)
+	if not final and h.Health > 0 and h.Health < before then
+		-- the combat core scales damage (realm etc.): learn the factor from what a hit really took
+		s.mult = math.max(s.mult or 0, (before - h.Health) / amount)
+	end
+end
+
 local function hit(s, h)
 	local list = victims(s, h.radius)
 	if h.knockback then unbind(s) end
 	for _, m in list do
-		Combat.Damage(s.player, m, h.damage, "ult", 0)
+		deal(s, m, h.damage, h.knockback ~= nil)
 		local mr = m:FindFirstChild("HumanoidRootPart")
 		if h.knockback and mr and not mr.Anchored then
 			local away = mr.Position - s.P
@@ -144,7 +164,7 @@ local function strokeHits(s, story)
 					local along, side = Config.StrokeProject(s.plan, i, mr.Position)
 					if side <= SH.passWidth and along >= -3 and along <= prog + 1 then
 						s.passed[i][m] = true
-						if Combat.CanHit(s.player, m) then Combat.Damage(s.player, m, SH.pass, "ult", 0) end
+						if Combat.CanHit(s.player, m) then deal(s, m, SH.pass) end
 					end
 				end
 			end
@@ -157,7 +177,7 @@ local function strokeHits(s, story)
 				if mr then
 					local along, side = Config.StrokeProject(s.plan, i, mr.Position)
 					if side <= SH.eruptWidth and along >= -4 and along <= s.plan.len[i] + 4 then
-						Combat.Damage(s.player, m, SH.erupt, "ult", 0)
+						deal(s, m, SH.erupt)
 					end
 				end
 			end
@@ -212,7 +232,7 @@ remote.OnServerEvent:Connect(function(player, action, id)
 		id = serial, player = player, char = char, hum = hum, root = root, tool = tool, origin = origin, P = P, lift = lift,
 		serverStart = workspace:GetServerTimeNow(), walk = hum.WalkSpeed, jump = hum.JumpPower, jumpHeight = hum.JumpHeight,
 		rotate = hum.AutoRotate, anchored = root.Anchored, bound = {}, hits = {}, plan = plan,
-		passed = { {}, {}, {} }, passDone = {}, erupted = {},
+		passed = { {}, {}, {} }, passDone = {}, erupted = {}, owed = {},
 	}
 	sessions[player] = s
 	cooldowns[player] = now + COOLDOWN
