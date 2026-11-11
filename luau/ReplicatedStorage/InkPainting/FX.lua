@@ -729,8 +729,8 @@ function FX.New(ctx)
 		-- the ink. A Beam lays its texture sideways (texture X across the width, Y along the length) and slides it,
 		-- so the stroke picture came out as a flat-ended black slab (Studio test 2026-11-11). It goes on flat cards
 		-- along the curve instead, like the dash strokes: one picture over the whole stroke, each card shows its slice.
-		-- A SurfaceGui is one-sided, so every slice has a card facing each side of the stroke plane, and they are drawn
-		-- over everything: the ink crosses the paper-white target instead of hiding behind its Highlight.
+		-- A SurfaceGui is one-sided, so every slice has a card facing each side of the stroke plane. (AlwaysOnTop cards,
+		-- tried so the ink would cross the paper-white target, did not draw at all in the cutscene.)
 		local PX = 24
 		local segs = tier == 1 and 4 or 6
 		local cardH = fin.width * 1.4 -- room for the swell as it bursts
@@ -754,7 +754,7 @@ function FX.New(ctx)
 				sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
 				sg.CanvasSize = Vector2.new(math.max(8, math.floor(len * PX)), math.floor(cardH * PX))
 				sg.LightInfluence = 0
-				sg.AlwaysOnTop = true
+				sg.AlwaysOnTop = false
 				sg.Adornee = card
 				sg.Parent = card
 				local clip = Instance.new("Frame")
