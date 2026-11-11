@@ -713,6 +713,7 @@ function FX.New(ctx)
 			b.Texture = tex
 			b.TextureMode = Enum.TextureMode.Stretch
 			b.TextureLength = 1
+			b.TextureSpeed = 0 -- the default (1) slides the texture along the beam
 			b.Color = ColorSequence.new(color)
 			b.LightInfluence = 0
 			b.LightEmission = emission
@@ -724,8 +725,54 @@ function FX.New(ctx)
 			b.Parent = holder
 			return b
 		end
-		local F = { fin = fin, spots = {} }
-		F.ink = beam(Tex.strokeGround or Tex.stroke, BLACK, fin.width, 0, 0)
+		local F = { fin = fin, spots = {}, cards = {} }
+		-- the ink. A Beam lays its texture sideways (texture X across the width, Y along the length) and slides it,
+		-- so the stroke picture came out as a flat-ended black slab (Studio test 2026-11-11). It goes on flat cards
+		-- along the curve instead, like the dash strokes: one picture over the whole stroke, each card shows its slice.
+		-- A SurfaceGui is one-sided, so every slice has a card facing each side of the stroke plane, and they are drawn
+		-- over everything: the ink crosses the paper-white target instead of hiding behind its Highlight.
+		local PX = 24
+		local segs = tier == 1 and 4 or 6
+		local cardH = fin.width * 1.4 -- room for the swell as it bursts
+		local n0 = fin.root.RightVector -- normal of the stroke plane (the strike direction and up)
+		local pts, cum = { fin.a }, { 0 }
+		for k = 1, segs do
+			pts[k + 1] = Config.FinalAt(fin, k / segs)
+			cum[k + 1] = cum[k] + (pts[k + 1] - pts[k]).Magnitude
+		end
+		local L = cum[segs + 1]
+		F.length, F.px, F.cardH = L, PX, cardH
+		for k = 1, segs do
+			local a, b = pts[k], pts[k + 1]
+			local d3 = (b - a).Unit
+			local from, len = cum[k] - 0.15, (b - a).Magnitude + 0.3 -- slices overlap a little: no gaps at the bends
+			for _, n in { n0, -n0 } do
+				-- a Top-face SurfaceGui runs canvas X along the part's -Z (= d3: canvas left = the start of the slice)
+				local card = part(folder, "FinalCard", Vector3.new(cardH, 0.05, len), CFrame.fromMatrix((a + b) / 2 + n * 0.05, d3:Cross(n), n))
+				local sg = Instance.new("SurfaceGui")
+				sg.Face = Enum.NormalId.Top
+				sg.SizingMode = Enum.SurfaceGuiSizingMode.FixedSize
+				sg.CanvasSize = Vector2.new(math.max(8, math.floor(len * PX)), math.floor(cardH * PX))
+				sg.LightInfluence = 0
+				sg.AlwaysOnTop = true
+				sg.Adornee = card
+				sg.Parent = card
+				local clip = Instance.new("Frame")
+				clip.BackgroundTransparency = 1
+				clip.ClipsDescendants = true
+				clip.Size = UDim2.fromScale(0, 1)
+				clip.Parent = sg
+				local img = Instance.new("ImageLabel")
+				img.BackgroundTransparency = 1
+				img.Image = Tex.strokeGround or Tex.stroke
+				img.ImageColor3 = BLACK
+				img.ImageTransparency = 0.02
+				img.Size = UDim2.fromOffset(math.floor(L * PX), math.floor(fin.width * PX))
+				img.Position = UDim2.fromOffset(-math.floor(from * PX), math.floor((cardH - fin.width) * PX / 2))
+				img.Parent = clip
+				table.insert(F.cards, { from = from, len = len, clip = clip, img = img, x = -math.floor(from * PX) })
+			end
+		end
 		-- a red-hot aura behind the ink: black ink alone vanished against the dark red world (Studio test 2026-11-11).
 		-- One soft glow per half, so it is brightest where the stroke shows either side of the target
 		F.halo = {
@@ -776,8 +823,15 @@ function FX.New(ctx)
 		local p = outCubic(lin(FA.Stroke + 0.03, FA.Mark, s))
 		local gone = lin(FA.Final, FA.Final + 0.2, s) -- it bursts: thrown apart in a fifth of a second
 		local swell = 1 + 0.4 * outCubic(gone)
-		F.ink.Transparency = revealSeq(p, 0.02 + 0.98 * gone)
-		F.ink.Width0, F.ink.Width1 = fin.width * swell, fin.width * swell
+		local front = p * (F.length + 0.15)
+		local w, h = math.floor(F.length * F.px), math.floor(fin.width * swell * F.px)
+		local y = math.floor((F.cardH * F.px - h) / 2)
+		for _, c in F.cards do
+			c.clip.Size = UDim2.fromScale(p > 0 and math.clamp((front - c.from) / c.len, 0, 1) or 0, 1)
+			c.img.ImageTransparency = 0.02 + 0.98 * gone
+			c.img.Size = UDim2.fromOffset(w, h)
+			c.img.Position = UDim2.fromOffset(c.x, y)
+		end
 		-- the aura comes in with the wet front, gathers heat through the beat (flickering) and flares out as it bursts
 		local heat = window(s, FA.Mark + 0.03, 0.22, FA.Final + 0.2, 0.2)
 		local flicker = 0.85 + 0.15 * math.sin(s * 53)
